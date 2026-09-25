@@ -19,12 +19,12 @@ local PlaceId = game.PlaceId
 -- 1. LINK RESMI LUNO UI LIBRARY KAMU
 local LunoLibraryURL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
 
--- 2. DAFTAR GAME DENGAN SCRIPT KHUSUS (Tambahkan PlaceId & Link Game Script di Sini)
+-- 2. DAFTAR GAME DENGAN SCRIPT KHUSUS (Nama Game, Place ID, & Script Link)
 local SupportedGames = {
-    [2753915549] = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BloxFruits.lua", -- Blox Fruits Sea 1
-    [4442272183] = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BloxFruits.lua", -- Blox Fruits Sea 2
-    [7449423635] = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BloxFruits.lua", -- Blox Fruits Sea 3
-    [13772394625] = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BladeBall.lua",  -- Blade Ball
+    [2753915549]  = { Name = "Blox Fruits (Sea 1)", Script = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BloxFruits.lua" },
+    [4442272183]  = { Name = "Blox Fruits (Sea 2)", Script = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BloxFruits.lua" },
+    [7449423635]  = { Name = "Blox Fruits (Sea 3)", Script = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BloxFruits.lua" },
+    [13772394625] = { Name = "Blade Ball",          Script = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BladeBall.lua"  },
 }
 
 -- Safe Parent GUI Function
@@ -280,16 +280,16 @@ task.spawn(function()
 
     UpdateTerminal(0.65, "SYS_ANALYSIS", "MATCH: Scanning Place ID [" .. tostring(PlaceId) .. "]...")
     
-    local TargetScriptURL = SupportedGames[PlaceId]
+    local TargetData = SupportedGames[PlaceId]
     
-    if TargetScriptURL then
+    if TargetData and TargetData.Script then
         UpdateTerminal(0.85, "GAME_MATCHED", "SUCCESS: Place ID Matched -> Loading Module...")
         UpdateTerminal(1.00, "SYSTEM_READY", "LAUNCH: Executing Game Script Assembly...")
         task.wait(0.4)
         FadeOutHUD()
         
         pcall(function()
-            loadstring(game:HttpGet(TargetScriptURL))()
+            loadstring(game:HttpGet(TargetData.Script))()
         end)
     else
         UpdateTerminal(0.85, "NO_DIRECT_MATCH", "WARN: Place Unlisted -> Initializing Universal Kernel...")
@@ -304,19 +304,44 @@ task.spawn(function()
             Discord = "https://discord.gg/lunar"
         })
 
-        local MainTab = Window:CreateTab("Universal Mode")
+        local MainTab = Window:CreateTab("Supported Games")
 
-        MainTab:CreateSection("System Info")
+        MainTab:CreateSection("Current Game Status")
         MainTab:CreateButton({
-            Title = "LUNO Universal Engine Active",
+            Title = "Game ini Belum Supported! (ID: " .. tostring(PlaceId) .. ")",
             Callback = function()
                 LunoLibrary:Notify({
-                    Title = "Universal Mode",
-                    Content = "This game is not in the custom supported list.",
-                    Duration = 3
+                    Title = "Not Supported",
+                    Content = "Place ID ini tidak ada dalam daftar supported games.",
+                    Duration = 4
                 })
             end
         })
+
+        MainTab:CreateSection("Daftar Game Yang Supported")
+
+        -- Menampilkan seluruh list game yang support secara otomatis
+        for pid, gameData in pairs(SupportedGames) do
+            MainTab:CreateButton({
+                Title = gameData.Name .. " [ID: " .. tostring(pid) .. "]",
+                Callback = function()
+                    if setclipboard then
+                        setclipboard(tostring(pid))
+                        LunoLibrary:Notify({
+                            Title = "Copied!",
+                            Content = "Place ID untuk " .. gameData.Name .. " telah disalin!",
+                            Duration = 3
+                        })
+                    else
+                        LunoLibrary:Notify({
+                            Title = gameData.Name,
+                            Content = "Place ID: " .. tostring(pid),
+                            Duration = 3
+                        })
+                    end
+                end
+            })
+        end
 
         MainTab:CreateSection("Universal Utilities")
         MainTab:CreateButton({
