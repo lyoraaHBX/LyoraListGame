@@ -1,20 +1,19 @@
--- Memanggil UI Library dari URL Raw
+-- Panggil UI Library dari URL Hosting Anda (GitHub / Pastebin)
 local LunoLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
 
--- Membuat Window Utama
+-- Buat Window Utama LUNO
 local Window = LunoLibrary:CreateWindow({
     Title = "LUNO",
     SubTitle = "by LUNAR"
 })
 
--- TAB 1: Home / Script List
+-- Tab 1: Home / Script List
 local HomeTab = Window:CreateTab("Home")
 local ScriptList = HomeTab:CreateScriptList()
 
 ScriptList:AddCard({
-    Title = "Blox Fruits",
-    Category = "Combat",
-    Description = "Auto Farm, ESP, Devil Fruit, Teleport...",
+    Title = "Blox Fruits Hub",
+    Description = "Auto Farm Level, ESP, Devil Fruit, Teleport...",
     Icon = "rbxassetid://10902325308",
     Callback = function()
         setclipboard("loadstring(game:HttpGet('https://raw.githubusercontent.com/Example/BloxFruits/main/script.lua'))()")
@@ -22,28 +21,27 @@ ScriptList:AddCard({
 })
 
 ScriptList:AddCard({
-    Title = "BedWars",
-    Category = "Combat",
-    Description = "Auto Farm, Kill Aura, Team Check...",
+    Title = "BedWars Advantage",
+    Description = "Kill Aura, Fly, Bed ESP, Teleport, Auto Win...",
     Icon = "rbxassetid://10902325308",
     Callback = function()
         setclipboard("loadstring(game:HttpGet('https://raw.githubusercontent.com/Example/BedWars/main/script.lua'))()")
     end
 })
 
--- TAB 2: Main Scripts & Features
-local MainTab = Window:CreateTab("Scripts")
+-- Tab 2: Feature Controls
+local ScriptsTab = Window:CreateTab("Scripts")
 
-MainTab:CreateToggle("Auto Farm Level", false, function(Value)
-    print("Auto Farm State:", Value)
+ScriptsTab:CreateToggle("Auto Farm Level", false, function(Value)
+    print("Auto Farm Active:", Value)
 end)
 
-MainTab:CreateSlider("WalkSpeed", 16, 200, 16, function(Value)
+ScriptsTab:CreateSlider("WalkSpeed", 16, 250, 16, function(Value)
     if game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid") then
         game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = Value
     end
 end)
 
-MainTab:CreateButton("Teleport SafeZone", function()
-    print("Teleporting...")
+ScriptsTab:CreateButton("Teleport SafeZone", function()
+    print("Teleported to SafeZone!")
 end)
