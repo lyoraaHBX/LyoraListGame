@@ -1,19 +1,20 @@
 -- Panggil UI Library dari URL Hosting Anda (GitHub / Pastebin)
 local LunoLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
 
+
 LunoLibrary:Notify({
     Title = "LUNO Loaded",
-    Content = "v9.0 Perfect Edition Ready!",
+    Content = "v10.0 Sidebar Masterpiece Edition!",
     Duration = 3
 })
 
 local Window = LunoLibrary:CreateWindow({
     Title = "LUNO",
     SubTitle = "by LUNAR",
-    Discord = "https://discord.gg/lunar" -- Custom Discord Link
+    Discord = "https://discord.gg/lunar" -- Link Discord Anda
 })
 
--- TAB 1: Main Farm (Positioned cleanly under header)
+-- TAB 1: Main Farm
 local MainTab = Window:CreateTab("Main Farm")
 
 MainTab:CreateSection("Auto Farming Options")
