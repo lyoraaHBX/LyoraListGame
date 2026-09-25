@@ -1,8 +1,8 @@
 -- Panggil UI Library dari URL Hosting Anda (GitHub / Pastebin)
 local LunoLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
 LunoLibrary:Notify({
-    Title = "LUNO Loaded",
-    Content = "Clean execution & full MISC features active!",
+    Title = "LUNO Hub Loaded",
+    Content = "Clean execution & tabs ordered perfectly!",
     Duration = 3
 })
 
@@ -12,17 +12,43 @@ local Window = LunoLibrary:CreateWindow({
     SubTitle = "Universal Hub"
 })
 
--- Anda CUKUP buat Tab khusus Game Anda di sini:
+-- TAB 1: Main Farm (Otomatis Paling Atas #1)
 local MainTab = Window:CreateTab("Main Farm")
-local ScriptList = MainTab:CreateScriptList()
 
-ScriptList:AddCard({
-    Title = "Auto Farm Blox Fruits",
-    Description = "Auto Farm Level, Auto Chest, Devil Fruit Sniper...",
-    Icon = "rbxassetid://10902325308",
-    Callback = function()
-        print("Executing script...")
+MainTab:CreateSection("Auto Farming Options")
+
+MainTab:CreateToggle({
+    Title = "Auto Farm Level",
+    Default = false,
+    Flag = "AutoFarmLevel",
+    Callback = function(State)
+        print("Auto Farm Active:", State)
     end
 })
 
--- TAB MISC DAN TAB CONFIG OTOMATIS SUDAH ADA DI BAWAH MENU SECARA OTOMATIS!
+MainTab:CreateToggle({
+    Title = "Auto Accept Quests",
+    Default = true,
+    Flag = "AutoQuests",
+    Callback = function(State)
+        print("Auto Quests Active:", State)
+    end
+})
+
+-- TAB 2: Combat Features (Otomatis Urutan #2)
+local CombatTab = Window:CreateTab("Combat")
+
+CombatTab:CreateSection("Weapon Settings")
+
+CombatTab:CreateDropdown({
+    Title = "Select Weapon",
+    Options = {"Melee", "Sword", "Devil Fruit"},
+    Default = "Melee",
+    Flag = "SelectedWeapon",
+    Multi = false,
+    Callback = function(Selected)
+        print("Weapon Chosen:", Selected)
+    end
+})
+
+-- Selesai! Tab MISC dan Config otomatis tersusun DI BAWAH tab "Main Farm" & "Combat"!
