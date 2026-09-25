@@ -1,18 +1,18 @@
 -- Panggil UI Library dari URL Hosting Anda (GitHub / Pastebin)
 local LunoLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
+
 LunoLibrary:Notify({
-    Title = "LUNO Hub Loaded",
-    Content = "Clean execution & tabs ordered perfectly!",
+    Title = "LUNO Loaded",
+    Content = "v8.0 Polish Edition Ready!",
     Duration = 3
 })
 
--- Buat Window Utama
 local Window = LunoLibrary:CreateWindow({
     Title = "LUNO",
     SubTitle = "Universal Hub"
 })
 
--- TAB 1: Main Farm (Otomatis Paling Atas #1)
+-- TAB 1: Main Farm
 local MainTab = Window:CreateTab("Main Farm")
 
 MainTab:CreateSection("Auto Farming Options")
@@ -20,35 +20,35 @@ MainTab:CreateSection("Auto Farming Options")
 MainTab:CreateToggle({
     Title = "Auto Farm Level",
     Default = false,
-    Flag = "AutoFarmLevel",
+    Flag = "AutoFarmLevelFlag", -- Flag khusus untuk config
     Callback = function(State)
         print("Auto Farm Active:", State)
     end
 })
 
-MainTab:CreateToggle({
-    Title = "Auto Accept Quests",
-    Default = true,
-    Flag = "AutoQuests",
-    Callback = function(State)
-        print("Auto Quests Active:", State)
+MainTab:CreateSlider({
+    Title = "Attack Speed",
+    Min = 1,
+    Max = 100,
+    Default = 10,
+    Suffix = " ms",
+    Flag = "AttackSpeedFlag", -- Flag khusus untuk config
+    Callback = function(Val)
+        print("Attack Speed:", Val)
     end
 })
 
--- TAB 2: Combat Features (Otomatis Urutan #2)
+-- TAB 2: Combat
 local CombatTab = Window:CreateTab("Combat")
 
-CombatTab:CreateSection("Weapon Settings")
+CombatTab:CreateSection("PvP Settings")
 
 CombatTab:CreateDropdown({
-    Title = "Select Weapon",
-    Options = {"Melee", "Sword", "Devil Fruit"},
+    Title = "Weapon Weapon Target",
+    Options = {"Melee", "Sword", "Fruit"},
     Default = "Melee",
-    Flag = "SelectedWeapon",
-    Multi = false,
-    Callback = function(Selected)
-        print("Weapon Chosen:", Selected)
+    Flag = "WeaponTargetFlag", -- Flag khusus untuk config
+    Callback = function(Sel)
+        print("Selected Weapon:", Sel)
     end
 })
-
--- Selesai! Tab MISC dan Config otomatis tersusun DI BAWAH tab "Main Farm" & "Combat"!
