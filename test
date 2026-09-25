@@ -17,7 +17,7 @@ local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
 -- 1. KONFIGURASI LINK SCRIPT
-local LunoLibraryURL = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/LunoLibrary.lua"
+local LunoLibraryURL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
 
 -- Daftar Game yang Didukung (Tambahkan Place ID & Link Script Khusus Game di Sini)
 local SupportedGames = {
