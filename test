@@ -1,11 +1,11 @@
 --[[
-    LUNO CYBER-TERMINAL LOADER v11.0 (AAA Sci-Fi HUD Edition)
+    LUNO CYBER-TERMINAL LOADER v11.0 (Official Library Integration)
     Features:
-      - Custom Live Console Log Terminal (Real-time System Stream).
-      - Monospace Code Font & Native Roblox Binary Typography (0% Blank Text Bug).
-      - Pulsing Tech Status LED & Dual-Glow Cyber Meter.
-      - Auto PlaceId Game Detector & Universal Fallback Engine.
-      - 100% Emoji Free & High-End Aesthetic.
+      - Linked directly to official LUNO UI Library repository.
+      - Live Cyber Terminal Console Feed (Real-time system stream).
+      - Guaranteed UI Execution & Fallback Window.
+      - 100% Native Roblox Binary Fonts (Zero blank text bug).
+      - Clean, minimal, and 100% Emoji-Free.
 --]]
 
 local TweenService = game:GetService("TweenService")
@@ -16,10 +16,10 @@ local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
--- 1. KONFIGURASI LINK SCRIPT
+-- 1. LINK RESMI LUNO UI LIBRARY KAMU
 local LunoLibraryURL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
 
--- Daftar Game yang Didukung (Tambahkan Place ID & Link Script Khusus Game di Sini)
+-- 2. DAFTAR GAME DENGAN SCRIPT KHUSUS (Tambahkan PlaceId & Link Game Script di Sini)
 local SupportedGames = {
     [2753915549] = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BloxFruits.lua", -- Blox Fruits Sea 1
     [4442272183] = "https://raw.githubusercontent.com/YourUsername/YourRepo/main/Games/BloxFruits.lua", -- Blox Fruits Sea 2
@@ -78,7 +78,7 @@ TopAccent.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
 TopAccent.BorderSizePixel = 0
 TopAccent.Parent = MainHUD
 
--- Top Status Bar (LED + Title)
+-- Top Status Bar
 local TopBar = Instance.new("Frame")
 TopBar.Size = UDim2.new(1, -30, 0, 30)
 TopBar.Position = UDim2.new(0, 15, 0, 10)
@@ -140,7 +140,7 @@ ConsoleText.BackgroundTransparency = 1
 ConsoleText.Text = "[00.00] BOOT: Initializing LUNO Kernel...\n"
 ConsoleText.TextColor3 = Color3.fromRGB(110, 160, 200)
 ConsoleText.TextSize = 10
-ConsoleText.Font = Enum.Font.Code -- Monospace Font untuk gaya Terminal Peretas
+ConsoleText.Font = Enum.Font.Code
 ConsoleText.TextXAlignment = Enum.TextXAlignment.Left
 ConsoleText.TextYAlignment = Enum.TextYAlignment.Top
 ConsoleText.TextTransparency = 1
@@ -263,20 +263,28 @@ task.spawn(function()
     FadeInHUD()
     
     UpdateTerminal(0.15, "ENV_CHECK", "ENV: Identifying Client Hardware & Level...")
-    UpdateTerminal(0.35, "NET_CONNECT", "NET: Handshake -> LUNO Cloud Server...")
+    UpdateTerminal(0.35, "NET_CONNECT", "NET: Handshake -> GitHub Raw Repository...")
     
+    -- Mengunduh LUNO UI Library langsung dari link milikmu
     local LunoLibrary = nil
-    pcall(function()
+    local success, err = pcall(function()
         LunoLibrary = loadstring(game:HttpGet(LunoLibraryURL))()
     end)
     
-    UpdateTerminal(0.60, "SYS_ANALYSIS", "MATCH: Scanning Place ID [" .. tostring(PlaceId) .. "]...")
+    if not success or not LunoLibrary then
+        UpdateTerminal(0.50, "NET_ERROR", "ERR: Failed to fetch UI Library!")
+        task.wait(2)
+        FadeOutHUD()
+        return
+    end
+
+    UpdateTerminal(0.65, "SYS_ANALYSIS", "MATCH: Scanning Place ID [" .. tostring(PlaceId) .. "]...")
     
     local TargetScriptURL = SupportedGames[PlaceId]
     
     if TargetScriptURL then
-        UpdateTerminal(0.85, "GAME_MATCHED", "SUCCESS: Place ID Matched -> Loading Custom Module...")
-        UpdateTerminal(1.00, "SYSTEM_READY", "LAUNCH: Executing Targeted Game Assembly...")
+        UpdateTerminal(0.85, "GAME_MATCHED", "SUCCESS: Place ID Matched -> Loading Module...")
+        UpdateTerminal(1.00, "SYSTEM_READY", "LAUNCH: Executing Game Script Assembly...")
         task.wait(0.4)
         FadeOutHUD()
         
@@ -285,38 +293,37 @@ task.spawn(function()
         end)
     else
         UpdateTerminal(0.85, "NO_DIRECT_MATCH", "WARN: Place Unlisted -> Initializing Universal Kernel...")
-        UpdateTerminal(1.00, "SYSTEM_READY", "LAUNCH: Loading Universal LUNO Framework...")
+        UpdateTerminal(1.00, "SYSTEM_READY", "LAUNCH: Opening Universal LUNO Window...")
         task.wait(0.4)
         FadeOutHUD()
         
-        if LunoLibrary then
-            local Window = LunoLibrary:CreateWindow({
-                Title = "LUNO",
-                SubTitle = "Universal",
-                Discord = "https://discord.gg/lunar"
-            })
+        -- Membuka UI LUNO Mode Universal
+        local Window = LunoLibrary:CreateWindow({
+            Title = "LUNO",
+            SubTitle = "Universal",
+            Discord = "https://discord.gg/lunar"
+        })
 
-            local MainTab = Window:CreateTab("Universal Mode")
+        local MainTab = Window:CreateTab("Universal Mode")
 
-            MainTab:CreateSection("System Info")
-            MainTab:CreateButton({
-                Title = "LUNO Universal Engine Running",
-                Callback = function()
-                    LunoLibrary:Notify({
-                        Title = "Universal Mode",
-                        Content = "This game is not in the custom supported list.",
-                        Duration = 3
-                    })
-                end
-            })
+        MainTab:CreateSection("System Info")
+        MainTab:CreateButton({
+            Title = "LUNO Universal Engine Active",
+            Callback = function()
+                LunoLibrary:Notify({
+                    Title = "Universal Mode",
+                    Content = "This game is not in the custom supported list.",
+                    Duration = 3
+                })
+            end
+        })
 
-            MainTab:CreateSection("Universal Utilities")
-            MainTab:CreateButton({
-                Title = "Rejoin Server",
-                Callback = function()
-                    game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-                end
-            })
-        end
+        MainTab:CreateSection("Universal Utilities")
+        MainTab:CreateButton({
+            Title = "Rejoin Server",
+            Callback = function()
+                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+            end
+        })
     end
 end)
