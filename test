@@ -1,19 +1,19 @@
 -- Panggil UI Library dari URL Hosting Anda (GitHub / Pastebin)
 local LunoLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
 
--- Buat Window Utama LUNO
+-- Inisialisasi Window UI
 local Window = LunoLibrary:CreateWindow({
     Title = "LUNO",
     SubTitle = "by LUNAR"
 })
 
--- Tab 1: Home / Script List
+-- TAB 1: Home / Script List
 local HomeTab = Window:CreateTab("Home")
 local ScriptList = HomeTab:CreateScriptList()
 
 ScriptList:AddCard({
     Title = "Blox Fruits Hub",
-    Description = "Auto Farm Level, ESP, Devil Fruit, Teleport...",
+    Description = "Auto Farm, ESP, Devil Fruit, Teleport...",
     Icon = "rbxassetid://10902325308",
     Callback = function()
         setclipboard("loadstring(game:HttpGet('https://raw.githubusercontent.com/Example/BloxFruits/main/script.lua'))()")
@@ -22,26 +22,26 @@ ScriptList:AddCard({
 
 ScriptList:AddCard({
     Title = "BedWars Advantage",
-    Description = "Kill Aura, Fly, Bed ESP, Teleport, Auto Win...",
+    Description = "Kill Aura, Bed ESP, Teleport, Fly...",
     Icon = "rbxassetid://10902325308",
     Callback = function()
         setclipboard("loadstring(game:HttpGet('https://raw.githubusercontent.com/Example/BedWars/main/script.lua'))()")
     end
 })
 
--- Tab 2: Feature Controls
-local ScriptsTab = Window:CreateTab("Scripts")
+-- TAB 2: Custom Controls & Features
+local MainTab = Window:CreateTab("Scripts")
 
-ScriptsTab:CreateToggle("Auto Farm Level", false, function(Value)
-    print("Auto Farm Active:", Value)
+MainTab:CreateToggle("Auto Farm Level", false, function(Value)
+    print("Auto Farm State:", Value)
 end)
 
-ScriptsTab:CreateSlider("WalkSpeed", 16, 250, 16, function(Value)
+MainTab:CreateSlider("WalkSpeed", 16, 250, 16, function(Value)
     if game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid") then
         game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = Value
     end
 end)
 
-ScriptsTab:CreateButton("Teleport SafeZone", function()
+MainTab:CreateButton("Teleport SafeZone", function()
     print("Teleported to SafeZone!")
 end)
