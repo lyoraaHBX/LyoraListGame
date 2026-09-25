@@ -1,6 +1,6 @@
 -- =========================================================================
--- LUNO STYLE - UI LIBRARY BASE TEMPLATE
--- Dibuat berdasarkan referensi gambar (Dark Theme, Blue Neon Accents)
+-- LUNO STYLE - UI LIBRARY BASE TEMPLATE (V2)
+-- Features: Close, Minimize (Toggle Button), Auto Device Detection
 -- =========================================================================
 
 local LunoLibrary = {}
@@ -8,18 +8,27 @@ local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
--- Colors based on the image
+-- Deteksi Device (Mobile / PC)
+local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+-- Colors Theme
 local Theme = {
     MainBackground = Color3.fromRGB(12, 14, 25),
     SidebarBackground = Color3.fromRGB(18, 22, 38),
     ElementBackground = Color3.fromRGB(25, 30, 50),
     AccentBlue = Color3.fromRGB(45, 125, 255),
-    AccentGlow = Color3.fromRGB(70, 150, 255),
     TextWhite = Color3.fromRGB(255, 255, 255),
-    TextGray = Color3.fromRGB(160, 170, 190)
+    TextGray = Color3.fromRGB(160, 170, 190),
+    CloseRed = Color3.fromRGB(255, 60, 60),
+    MinYellow = Color3.fromRGB(255, 200, 0)
 }
 
--- Utility function to make things draggable
+-- Destroy old instance if exists to prevent duplicates
+if CoreGui:FindFirstChild("LunoUIBase") then
+    CoreGui:FindFirstChild("LunoUIBase"):Destroy()
+end
+
+-- Universal Draggable Function (Support Touch & Mouse)
 local function MakeDraggable(topbarobject, object)
     local Dragging = nil
     local DragInput = nil
@@ -32,9 +41,7 @@ local function MakeDraggable(topbarobject, object)
             DragStart = input.Position
             StartPosition = object.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    Dragging = false
-                end
+                if input.UserInputState == Enum.UserInputState.End then Dragging = false end
             end)
         end
     end)
@@ -59,13 +66,44 @@ function LunoLibrary:CreateWindow(WindowName)
     LunoUI.Parent = CoreGui
     LunoUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
-    -- Main Window
+    -- ==================== TOGGLE BUTTON (MINIMIZED STATE) ====================
+    local ToggleButton = Instance.new("TextButton")
+    ToggleButton.Name = "ToggleButton"
+    ToggleButton.Parent = LunoUI
+    ToggleButton.BackgroundColor3 = Theme.AccentBlue
+    ToggleButton.Position = UDim2.new(0.5, -25, 0, 20) -- Posisi atas tengah
+    ToggleButton.Size = UDim2.new(0, 50, 0, 50)
+    ToggleButton.Font = Enum.Font.GothamBold
+    ToggleButton.Text = "L"
+    ToggleButton.TextColor3 = Theme.TextWhite
+    ToggleButton.TextSize = 24
+    ToggleButton.Visible = false -- Sembunyi saat window utama terbuka
+    
+    local ToggleCorner = Instance.new("UICorner")
+    ToggleCorner.CornerRadius = UDim.new(1, 0) -- Membuatnya bulat sempurna
+    ToggleCorner.Parent = ToggleButton
+    
+    local ToggleStroke = Instance.new("UIStroke")
+    ToggleStroke.Color = Theme.TextWhite
+    ToggleStroke.Thickness = 2
+    ToggleStroke.Parent = ToggleButton
+
+    MakeDraggable(ToggleButton, ToggleButton)
+
+    -- ==================== MAIN WINDOW ====================
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
     MainFrame.Parent = LunoUI
     MainFrame.BackgroundColor3 = Theme.MainBackground
-    MainFrame.Position = UDim2.new(0.5, -450, 0.5, -275)
-    MainFrame.Size = UDim2.new(0, 900, 0, 550)
+    
+    -- Sesuaikan ukuran berdasarkan device (Jika mobile, agak lebih kecil)
+    if IsMobile then
+        MainFrame.Size = UDim2.new(0, 600, 0, 350)
+        MainFrame.Position = UDim2.new(0.5, -300, 0.5, -175)
+    else
+        MainFrame.Size = UDim2.new(0, 900, 0, 550)
+        MainFrame.Position = UDim2.new(0.5, -450, 0.5, -275)
+    end
     MainFrame.ClipsDescendants = true
     
     local MainCorner = Instance.new("UICorner")
@@ -78,13 +116,60 @@ function LunoLibrary:CreateWindow(WindowName)
     MainStroke.Transparency = 0.5
     MainStroke.Parent = MainFrame
 
-    MakeDraggable(MainFrame, MainFrame)
+    -- ==================== TOPBAR (DRAG & CONTROLS) ====================
+    local Topbar = Instance.new("Frame")
+    Topbar.Name = "Topbar"
+    Topbar.Parent = MainFrame
+    Topbar.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    Topbar.BackgroundTransparency = 1
+    Topbar.Size = UDim2.new(1, 0, 0, 40)
+    Topbar.ZIndex = 5
 
-    -- Sidebar (Left)
+    MakeDraggable(Topbar, MainFrame) -- Jadikan Topbar sebagai area untuk menggeser window
+
+    -- Close Button
+    local CloseBtn = Instance.new("TextButton")
+    CloseBtn.Parent = Topbar
+    CloseBtn.BackgroundColor3 = Theme.CloseRed
+    CloseBtn.Position = UDim2.new(1, -35, 0.5, -8)
+    CloseBtn.Size = UDim2.new(0, 16, 0, 16)
+    CloseBtn.Text = ""
+    local CloseCorner = Instance.new("UICorner")
+    CloseCorner.CornerRadius = UDim.new(1, 0)
+    CloseCorner.Parent = CloseBtn
+
+    -- Minimize Button
+    local MinBtn = Instance.new("TextButton")
+    MinBtn.Parent = Topbar
+    MinBtn.BackgroundColor3 = Theme.MinYellow
+    MinBtn.Position = UDim2.new(1, -65, 0.5, -8)
+    MinBtn.Size = UDim2.new(0, 16, 0, 16)
+    MinBtn.Text = ""
+    local MinCorner = Instance.new("UICorner")
+    MinCorner.CornerRadius = UDim.new(1, 0)
+    MinCorner.Parent = MinBtn
+
+    -- Logika Tombol Close & Minimize
+    CloseBtn.MouseButton1Click:Connect(function()
+        LunoUI:Destroy() -- Menghapus script 100%
+    end)
+
+    MinBtn.MouseButton1Click:Connect(function()
+        MainFrame.Visible = false
+        ToggleButton.Visible = true
+    end)
+
+    ToggleButton.MouseButton1Click:Connect(function()
+        MainFrame.Visible = true
+        ToggleButton.Visible = false
+    end)
+
+    -- ==================== SIDEBAR ====================
     local Sidebar = Instance.new("Frame")
     Sidebar.Name = "Sidebar"
     Sidebar.Parent = MainFrame
     Sidebar.BackgroundColor3 = Theme.SidebarBackground
+    Sidebar.Position = UDim2.new(0, 0, 0, 0)
     Sidebar.Size = UDim2.new(0, 200, 1, 0)
     
     local SidebarCorner = Instance.new("UICorner")
@@ -97,9 +182,9 @@ function LunoLibrary:CreateWindow(WindowName)
     LogoText.Position = UDim2.new(0, 20, 0, 20)
     LogoText.Size = UDim2.new(1, -40, 0, 40)
     LogoText.Font = Enum.Font.GothamBold
-    LogoText.Text = WindowName
+    LogoText.Text = WindowName .. (IsMobile and " (M)" or " (PC)") -- Indikator deteksi device
     LogoText.TextColor3 = Theme.TextWhite
-    LogoText.TextSize = 24
+    LogoText.TextSize = 22
     LogoText.TextXAlignment = Enum.TextXAlignment.Left
 
     local TabContainer = Instance.new("ScrollingFrame")
@@ -107,7 +192,7 @@ function LunoLibrary:CreateWindow(WindowName)
     TabContainer.Active = true
     TabContainer.BackgroundTransparency = 1
     TabContainer.Position = UDim2.new(0, 10, 0, 80)
-    TabContainer.Size = UDim2.new(1, -20, 1, -150)
+    TabContainer.Size = UDim2.new(1, -20, 1, -90)
     TabContainer.ScrollBarThickness = 0
     
     local TabListLayout = Instance.new("UIListLayout")
@@ -115,19 +200,18 @@ function LunoLibrary:CreateWindow(WindowName)
     TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
     TabListLayout.Padding = UDim.new(0, 8)
 
-    -- Main Content Area (Right)
+    -- ==================== CONTENT AREA ====================
     local ContentArea = Instance.new("Frame")
     ContentArea.Name = "ContentArea"
     ContentArea.Parent = MainFrame
     ContentArea.BackgroundTransparency = 1
-    ContentArea.Position = UDim2.new(0, 210, 0, 20)
-    ContentArea.Size = UDim2.new(1, -230, 1, -40)
+    ContentArea.Position = UDim2.new(0, 210, 0, 40) -- Turun 40px karena ada topbar
+    ContentArea.Size = UDim2.new(1, -230, 1, -60)
 
     local Window = {}
     local CurrentTab = nil
 
     function Window:MakeTab(TabName)
-        -- Tab Button in Sidebar
         local TabBtn = Instance.new("TextButton")
         TabBtn.Parent = TabContainer
         TabBtn.BackgroundColor3 = Theme.AccentBlue
@@ -143,13 +227,12 @@ function LunoLibrary:CreateWindow(WindowName)
         TabBtnCorner.CornerRadius = UDim.new(0, 8)
         TabBtnCorner.Parent = TabBtn
 
-        -- Tab Content Page
         local TabPage = Instance.new("ScrollingFrame")
         TabPage.Parent = ContentArea
         TabPage.Active = true
         TabPage.BackgroundTransparency = 1
         TabPage.Size = UDim2.new(1, 0, 1, 0)
-        TabPage.ScrollBarThickness = 4
+        TabPage.ScrollBarThickness = IsMobile and 2 or 4 -- Scrollbar lebih tipis di mobile
         TabPage.ScrollBarImageColor3 = Theme.AccentBlue
         TabPage.Visible = false
         
@@ -158,7 +241,6 @@ function LunoLibrary:CreateWindow(WindowName)
         PageLayout.SortOrder = Enum.SortOrder.LayoutOrder
         PageLayout.Padding = UDim.new(0, 10)
 
-        -- Tab Switching Logic
         TabBtn.MouseButton1Click:Connect(function()
             for _, child in pairs(ContentArea:GetChildren()) do
                 if child:IsA("ScrollingFrame") then child.Visible = false end
@@ -172,7 +254,6 @@ function LunoLibrary:CreateWindow(WindowName)
             TweenService:Create(TabBtn, TweenInfo.new(0.3), {BackgroundTransparency = 0, TextColor3 = Theme.TextWhite}):Play()
         end)
 
-        -- Make first tab active by default
         if CurrentTab == nil then
             CurrentTab = TabPage
             TabPage.Visible = true
@@ -182,7 +263,6 @@ function LunoLibrary:CreateWindow(WindowName)
 
         local Tab = {}
 
-        -- Function to create the specific "Script Cards" shown in the image
         function Tab:AddScriptCard(GameName, Tags, Callback)
             local Card = Instance.new("Frame")
             Card.Parent = TabPage
@@ -220,7 +300,6 @@ function LunoLibrary:CreateWindow(WindowName)
             Desc.TextSize = 12
             Desc.TextXAlignment = Enum.TextXAlignment.Left
 
-            -- Placeholder for Icon (Square on the left)
             local IconPlaceholder = Instance.new("Frame")
             IconPlaceholder.Parent = Card
             IconPlaceholder.BackgroundColor3 = Theme.AccentBlue
@@ -261,47 +340,29 @@ function LunoLibrary:CreateWindow(WindowName)
 end
 
 -- =========================================================================
--- CARA PENGGUNAAN (EXAMPLE USAGE)
+-- CARA PENGGUNAAN
 -- =========================================================================
 
 -- 1. Buat Window Utama
 local MyWindow = LunoLibrary:CreateWindow("LUNO")
 
--- 2. Buat Tab di Sidebar
-local HomeTab = MyWindow:MakeTab("Home")
+-- 2. Buat Tab
 local ScriptsTab = MyWindow:MakeTab("Scripts List")
 local SettingsTab = MyWindow:MakeTab("Settings")
 
--- 3. Tambahkan Konten ke dalam Tab (Menggunakan desain Card seperti di gambar)
+-- 3. Isi Tab dengan Script Card
 ScriptsTab:AddScriptCard(
     "Blox Fruits", 
-    "Auto Farm, ESP, Devil Fruit, Teleport...", 
+    "Auto Farm, ESP, Devil Fruit...", 
     function()
-        print("Blox Fruits script executed!")
-        -- Taruh loadstring/script blox fruit disini
+        print("Blox Fruits Executed!")
     end
 )
 
 ScriptsTab:AddScriptCard(
     "BedWars", 
-    "Auto Farm, Kill Aura, Team Check...", 
+    "Auto Farm, Kill Aura...", 
     function()
-        print("BedWars script executed!")
-    end
-)
-
-ScriptsTab:AddScriptCard(
-    "Universal", 
-    "All Games Support (Beta)", 
-    function()
-        print("Universal script executed!")
-    end
-)
-
-ScriptsTab:AddScriptCard(
-    "Arsenal", 
-    "Aimbot, ESP, No Recoil...", 
-    function()
-        print("Arsenal script executed!")
+        print("BedWars Executed!")
     end
 )
