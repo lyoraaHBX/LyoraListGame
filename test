@@ -3,16 +3,17 @@ local LunoLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/l
 
 LunoLibrary:Notify({
     Title = "LUNO Loaded",
-    Content = "v8.0 Polish Edition Ready!",
+    Content = "v9.0 Perfect Edition Ready!",
     Duration = 3
 })
 
 local Window = LunoLibrary:CreateWindow({
     Title = "LUNO",
-    SubTitle = "Universal Hub"
+    SubTitle = "by LUNAR",
+    Discord = "https://discord.gg/lunar" -- Custom Discord Link
 })
 
--- TAB 1: Main Farm
+-- TAB 1: Main Farm (Positioned cleanly under header)
 local MainTab = Window:CreateTab("Main Farm")
 
 MainTab:CreateSection("Auto Farming Options")
@@ -20,7 +21,7 @@ MainTab:CreateSection("Auto Farming Options")
 MainTab:CreateToggle({
     Title = "Auto Farm Level",
     Default = false,
-    Flag = "AutoFarmLevelFlag", -- Flag khusus untuk config
+    Flag = "AutoFarmLevelFlag",
     Callback = function(State)
         print("Auto Farm Active:", State)
     end
@@ -32,7 +33,7 @@ MainTab:CreateSlider({
     Max = 100,
     Default = 10,
     Suffix = " ms",
-    Flag = "AttackSpeedFlag", -- Flag khusus untuk config
+    Flag = "AttackSpeedFlag",
     Callback = function(Val)
         print("Attack Speed:", Val)
     end
@@ -44,10 +45,10 @@ local CombatTab = Window:CreateTab("Combat")
 CombatTab:CreateSection("PvP Settings")
 
 CombatTab:CreateDropdown({
-    Title = "Weapon Weapon Target",
+    Title = "Weapon Target",
     Options = {"Melee", "Sword", "Fruit"},
     Default = "Melee",
-    Flag = "WeaponTargetFlag", -- Flag khusus untuk config
+    Flag = "WeaponTargetFlag",
     Callback = function(Sel)
         print("Selected Weapon:", Sel)
     end
