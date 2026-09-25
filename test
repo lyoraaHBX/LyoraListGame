@@ -1,47 +1,140 @@
 -- Panggil UI Library dari URL Hosting Anda (GitHub / Pastebin)
 local LunoLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
 
--- Inisialisasi Window UI
+-- 2. MEMBUAT WINDOW UTAMA UI
 local Window = LunoLibrary:CreateWindow({
     Title = "LUNO",
     SubTitle = "by LUNAR"
 })
 
--- TAB 1: Home / Script List
+-- =================================================================
+-- TAB 1: HOME (SCRIPT LIST HUB + REAL-TIME SEARCH)
+-- =================================================================
 local HomeTab = Window:CreateTab("Home")
 local ScriptList = HomeTab:CreateScriptList()
 
+-- Menambahkan Kartu Script ke Daftar (Bisa dicari via Search Bar)
 ScriptList:AddCard({
-    Title = "Blox Fruits Hub",
-    Description = "Auto Farm, ESP, Devil Fruit, Teleport...",
+    Title = "Blox Fruits - Auto Farm Hub",
+    Description = "Auto Farm Level, Auto Chest, Devil Fruit Sniper, Teleport...",
     Icon = "rbxassetid://10902325308",
     Callback = function()
+        print("[LUNO] Executing Blox Fruits Script...")
         setclipboard("loadstring(game:HttpGet('https://raw.githubusercontent.com/Example/BloxFruits/main/script.lua'))()")
     end
 })
 
 ScriptList:AddCard({
     Title = "BedWars Advantage",
-    Description = "Kill Aura, Bed ESP, Teleport, Fly...",
+    Description = "Kill Aura, Bed ESP, Unlimited Fly, Auto Win...",
     Icon = "rbxassetid://10902325308",
     Callback = function()
+        print("[LUNO] Executing BedWars Script...")
         setclipboard("loadstring(game:HttpGet('https://raw.githubusercontent.com/Example/BedWars/main/script.lua'))()")
     end
 })
 
--- TAB 2: Custom Controls & Features
-local MainTab = Window:CreateTab("Scripts")
+ScriptList:AddCard({
+    Title = "Pet Simulator 99",
+    Description = "Auto Hatch Eggs, Auto Rank Up, Farm Coins, Rebirth...",
+    Icon = "rbxassetid://6031763426",
+    Callback = function()
+        print("[LUNO] Executing Pet Sim 99 Script...")
+    end
+})
 
-MainTab:CreateToggle("Auto Farm Level", false, function(Value)
-    print("Auto Farm State:", Value)
+ScriptList:AddCard({
+    Title = "Universal Game Utility",
+    Description = "Bypass Fly, WalkSpeed Slider, ESP Player, Infinite Jump...",
+    Icon = "rbxassetid://6031763426",
+    Callback = function()
+        print("[LUNO] Executing Universal Script...")
+    end
+})
+
+
+-- =================================================================
+-- TAB 2: COMBAT (TOGGLE, SLIDER, BUTTON)
+-- =================================================================
+local CombatTab = Window:CreateTab("Combat")
+
+-- Contoh Toggle (Sakelar)
+CombatTab:CreateToggle("Auto Kill Aura", false, function(State)
+    print("[COMBAT] Kill Aura Toggled:", State)
 end)
 
-MainTab:CreateSlider("WalkSpeed", 16, 250, 16, function(Value)
+CombatTab:CreateToggle("Auto Parry / Block Skill", true, function(State)
+    print("[COMBAT] Auto Parry Toggled:", State)
+end)
+
+-- Contoh Slider (Pengatur Nilai)
+CombatTab:CreateSlider("Hitbox Extender Size", 1, 50, 10, function(Value)
+    print("[COMBAT] Hitbox Size Changed to:", Value)
+end)
+
+-- Contoh Button (Tombol Klik)
+CombatTab:CreateButton("Trigger One-Hit Skill", function()
+    print("[COMBAT] One-Hit Skill Triggered!")
+end)
+
+
+-- =================================================================
+-- TAB 3: MOVEMENT & PLAYER (WALKSPEED, JUMP, FLY)
+-- =================================================================
+local MovementTab = Window:CreateTab("Movement")
+
+-- Slider Pengatur Kecepatan Karakter (WalkSpeed)
+MovementTab:CreateSlider("Player WalkSpeed", 16, 250, 16, function(Value)
     if game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid") then
         game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = Value
     end
 end)
 
-MainTab:CreateButton("Teleport SafeZone", function()
-    print("Teleported to SafeZone!")
+-- Slider Pengatur Lompatan Karakter (JumpPower)
+MovementTab:CreateSlider("Player JumpPower", 50, 300, 50, function(Value)
+    if game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid") then
+        game.Players.LocalPlayer.Character.Humanoid.JumpPower = Value
+    end
 end)
+
+-- Toggle Infinite Jump
+MovementTab:CreateToggle("Infinite Jump in Air", false, function(State)
+    print("[MOVEMENT] Infinite Jump:", State)
+end)
+
+-- Button Respawn
+MovementTab:CreateButton("Respawn / Reset Character", function()
+    if game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("Humanoid") then
+        game.Players.LocalPlayer.Character.Humanoid.Health = 0
+    end
+end)
+
+
+-- =================================================================
+-- TAB 4: VISUALS (ESP & FOV CAMERA)
+-- =================================================================
+local VisualsTab = Window:CreateTab("Visuals")
+
+VisualsTab:CreateToggle("Enable Player Box ESP", false, function(State)
+    print("[VISUALS] Box ESP Active:", State)
+end)
+
+VisualsTab:CreateToggle("Enable Tracers ESP", false, function(State)
+    print("[VISUALS] Tracers Active:", State)
+end)
+
+-- Slider Camera FOV
+VisualsTab:CreateSlider("Camera FOV", 70, 120, 70, function(Value)
+    workspace.CurrentCamera.FieldOfView = Value
+end)
+
+
+-- =================================================================
+-- INFO PENTING PENJELASAN FITUR PROFIL & SERVER:
+-- =================================================================
+-- 💡 FITUR PROFILE & SERVER HOP SUDAH BUILT-IN AUTOMATIS:
+-- Untuk membuka halaman Profile & Server Utilities (Rejoin, Random Hop, Small Hop):
+-- "KLIK LANGSUNG PADA KARTU PROFIL DI SIDEBAR KIRI BAWAH" (Yang menampilkan Foto Headshot Avatar & Nama Game Anda).
+-- =================================================================
+
+print("[LUNO UI] Full Showcase Loaded Successfully!")
