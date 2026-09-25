@@ -1,120 +1,28 @@
 -- Panggil UI Library dari URL Hosting Anda (GitHub / Pastebin)
 local LunoLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
-
--- Tampilkan Toast Notification saat Script Pertama Kali Dimuat
 LunoLibrary:Notify({
-    Title = "LUNO UI Loaded",
-    Content = "Welcome back! All features fully functional.",
-    Duration = 4
+    Title = "LUNO Loaded",
+    Content = "Clean execution & full MISC features active!",
+    Duration = 3
 })
 
--- Membuat Window Utama
+-- Buat Window Utama
 local Window = LunoLibrary:CreateWindow({
     Title = "LUNO",
-    SubTitle = "by LUNAR"
+    SubTitle = "Universal Hub"
 })
 
--- TAB 1: Script List (Home Hub)
-local HomeTab = Window:CreateTab("Home")
-local ScriptList = HomeTab:CreateScriptList()
+-- Anda CUKUP buat Tab khusus Game Anda di sini:
+local MainTab = Window:CreateTab("Main Farm")
+local ScriptList = MainTab:CreateScriptList()
 
 ScriptList:AddCard({
-    Title = "Blox Fruits - Auto Farm Hub",
+    Title = "Auto Farm Blox Fruits",
     Description = "Auto Farm Level, Auto Chest, Devil Fruit Sniper...",
     Icon = "rbxassetid://10902325308",
     Callback = function()
-        LunoLibrary:Notify({Title = "Script Executed", Content = "Blox Fruits Script Copied to Clipboard!", Duration = 3})
+        print("Executing script...")
     end
 })
 
--- TAB 2: Main Features (Semua Elemen Rayfield/WindUI)
-local FeaturesTab = Window:CreateTab("Features")
-
--- 1. Section Divider
-FeaturesTab:CreateSection("Combat Elements")
-
--- 2. Toggle
-FeaturesTab:CreateToggle({
-    Title = "Auto Kill Aura",
-    Default = false,
-    Callback = function(State)
-        print("Kill Aura:", State)
-    end
-})
-
--- 3. Slider
-FeaturesTab:CreateSlider({
-    Title = "Hitbox Size Extender",
-    Min = 1,
-    Max = 100,
-    Default = 10,
-    Suffix = " studs",
-    Callback = function(Value)
-        print("Hitbox Size:", Value)
-    end
-})
-
--- 4. Dropdown (Single Select)
-FeaturesTab:CreateDropdown({
-    Title = "Select Farm Weapon",
-    Options = {"Melee", "Sword", "Blox Fruit", "Gun"},
-    Default = "Melee",
-    Multi = false,
-    Callback = function(Selected)
-        print("Weapon Selected:", Selected)
-    end
-})
-
--- 5. Dropdown (Multi Select)
-FeaturesTab:CreateDropdown({
-    Title = "Select ESP Targets",
-    Options = {"Players", "Npcs", "Chests", "Devil Fruits"},
-    Default = {"Players", "Chests"},
-    Multi = true,
-    Callback = function(SelectedTable)
-        print("Multi ESP Targets:", table.concat(SelectedTable, ", "))
-    end
-})
-
-FeaturesTab:CreateSection("Player & Keybind Controls")
-
--- 6. Keybind Picker
-FeaturesTab:CreateKeybind({
-    Title = "Toggle Fly Keybind",
-    Default = Enum.KeyCode.F,
-    Callback = function(Key)
-        print("Fly Keybind Bound to:", Key.Name)
-    end
-})
-
--- 7. Input Text Box
-FeaturesTab:CreateInput({
-    Title = "Custom Teleport Player",
-    Placeholder = "Enter Username...",
-    Callback = function(Text)
-        print("Teleporting to Target:", Text)
-    end
-})
-
--- 8. Color Picker
-FeaturesTab:CreateColorPicker({
-    Title = "ESP Color Customizer",
-    Default = Color3.fromRGB(0, 110, 255),
-    Callback = function(Color)
-        print("Color Picked:", Color)
-    end
-})
-
--- 9. Paragraph Info Box
-FeaturesTab:CreateParagraph({
-    Title = "⚠️ Notice & Usage Tips",
-    Content = "Gunakan fitur ini dengan bijak. Untuk membuka informasi profil & Server Hop, klik kartu profil Anda di pojok kiri bawah!"
-})
-
--- 10. Button
-FeaturesTab:CreateButton({
-    Title = "Trigger Server Hop",
-    Callback = function()
-        LunoLibrary:Notify({Title = "Server Hop", Content = "Searching for new server...", Duration = 3})
-    end
-})
+-- TAB MISC DAN TAB CONFIG OTOMATIS SUDAH ADA DI BAWAH MENU SECARA OTOMATIS!
