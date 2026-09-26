@@ -5,7 +5,7 @@ local LibraryUrl = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/r
 local LunoLibrary = loadstring(game:HttpGet(LibraryUrl))()
 
 -- 1b. Load Jobs Data Module (via link, sama seperti load Library)
-local JobsDataUrl = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/JobsData.lua"
+local JobsDataUrl = "https://raw.githubusercontent.com/USERNAME/REPO/main/JobsData.lua"
 local JobsData = loadstring(game:HttpGet(JobsDataUrl))()
 local JOBS = JobsData.JOBS
 
@@ -202,6 +202,52 @@ local Window = LunoLibrary:CreateWindow({
 local MainTab = Window:CreateTab("Auto Farm")
 
 -- =========================================================
+-- HELPER: Paksa Matikan Toggle UI Secara Visual (Multi Fallback)
+-- Dipakai bareng oleh Daily Reward & Auto Allocate system
+-- =========================================================
+local function ForceSetToggleOff(toggleObject, flagName)
+    pcall(function()
+        if toggleObject and toggleObject.Set then
+            toggleObject:Set(false)
+        end
+    end)
+    pcall(function()
+        if toggleObject and toggleObject.SetValue then
+            toggleObject:SetValue(false)
+        end
+    end)
+    pcall(function()
+        if toggleObject and toggleObject.Toggle then
+            toggleObject:Toggle(false)
+        end
+    end)
+    pcall(function()
+        if toggleObject then
+            toggleObject.Value = false
+        end
+    end)
+    pcall(function()
+        if LunoLibrary.Flags and LunoLibrary.Flags[flagName] ~= nil then
+            if type(LunoLibrary.Flags[flagName]) == "table" then
+                LunoLibrary.Flags[flagName].Value = false
+            else
+                LunoLibrary.Flags[flagName] = false
+            end
+        end
+    end)
+    pcall(function()
+        if LunoLibrary.SetFlag then
+            LunoLibrary:SetFlag(flagName, false)
+        end
+    end)
+    pcall(function()
+        if LunoLibrary.UpdateToggle then
+            LunoLibrary:UpdateToggle(flagName, false)
+        end
+    end)
+end
+
+-- =========================================================
 -- AUTO JOB CONFIGURATIONS (LOGIC: CEK LEVEL -> CEK ENERGY)
 -- =========================================================
 MainTab:CreateSection("Auto Job Configurations")
@@ -257,48 +303,6 @@ local LADDER_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 local AutoClaimEnabled = false
 local ClaimedStatus = {false, false, false, false, false}
 local AutoClaimToggleRef = nil
-
-local function ForceSetToggleOff(toggleObject, flagName)
-    pcall(function()
-        if toggleObject and toggleObject.Set then
-            toggleObject:Set(false)
-        end
-    end)
-    pcall(function()
-        if toggleObject and toggleObject.SetValue then
-            toggleObject:SetValue(false)
-        end
-    end)
-    pcall(function()
-        if toggleObject and toggleObject.Toggle then
-            toggleObject:Toggle(false)
-        end
-    end)
-    pcall(function()
-        if toggleObject then
-            toggleObject.Value = false
-        end
-    end)
-    pcall(function()
-        if LunoLibrary.Flags and LunoLibrary.Flags[flagName] ~= nil then
-            if type(LunoLibrary.Flags[flagName]) == "table" then
-                LunoLibrary.Flags[flagName].Value = false
-            else
-                LunoLibrary.Flags[flagName] = false
-            end
-        end
-    end)
-    pcall(function()
-        if LunoLibrary.SetFlag then
-            LunoLibrary:SetFlag(flagName, false)
-        end
-    end)
-    pcall(function()
-        if LunoLibrary.UpdateToggle then
-            LunoLibrary:UpdateToggle(flagName, false)
-        end
-    end)
-end
 
 local function TryClaimReward(index)
     local success, result = pcall(function()
@@ -402,6 +406,134 @@ task.spawn(function()
                 LunoLibrary:Notify({
                     Title = "All Daily Rewards Claimed",
                     Content = "Semua reward 1-5 sudah diklaim. Auto Claim dimatikan otomatis (visual & logic) biar gak lag.",
+                    Duration = 5
+                })
+            end
+        end
+    end
+end)
+
+-- =========================================================
+-- AUTO POINT ALLOCATION (SKILL POINT) SYSTEM
+-- =========================================================
+local AllocateSkillPointRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("AllocateSkillPoint")
+local ALLOCATE_HASH = "ca01587a32b24eb1a0527e8e595e8483"
+
+-- Mapping Display Name -> Key yang dikirim ke server
+local StatOptionsList = {
+    "Energy",
+    "Stamina",
+    "Health",
+    "Attack",
+    "Defense",
+    "Property Capacity"
+}
+
+local StatKeyMap = {
+    ["Energy"] = "energy",
+    ["Stamina"] = "stamina",
+    ["Health"] = "health",
+    ["Attack"] = "attack",
+    ["Defense"] = "defense",
+    ["Property Capacity"] = "property"
+}
+
+local AutoAllocateEnabled = false
+local SelectedStatKey = "energy"
+local AutoAllocateToggleRef = nil
+
+local function TryAllocatePoint(statKey)
+    local success, result = pcall(function()
+        return AllocateSkillPointRemote:InvokeServer(ALLOCATE_HASH, statKey, 1)
+    end)
+
+    if success and type(result) == "table" then
+        if result.ok == true then
+            return true, result
+        else
+            return false, result
+        end
+    end
+
+    return false, nil
+end
+
+MainTab:CreateSection("Auto Point Allocation")
+
+MainTab:CreateDropdown({
+    Title = "Select Stat to Upgrade",
+    Options = StatOptionsList,
+    Multi = false,
+    Flag = "SelectedStatUpgrade",
+    Callback = function(Selected)
+        if StatKeyMap[Selected] then
+            SelectedStatKey = StatKeyMap[Selected]
+        end
+    end
+})
+
+AutoAllocateToggleRef = MainTab:CreateToggle({
+    Title = "Auto Allocate Skill Point",
+    Default = false,
+    Flag = "AutoAllocateToggle",
+    Callback = function(Value)
+        AutoAllocateEnabled = Value
+        if Value then
+            LunoLibrary:Notify({
+                Title = "Auto Allocate Started",
+                Content = "Sedang alokasi poin ke: " .. SelectedStatKey,
+                Duration = 3
+            })
+        end
+    end
+})
+
+MainTab:CreateButton({
+    Title = "Allocate 1 Point Now",
+    Callback = function()
+        local success, result = TryAllocatePoint(SelectedStatKey)
+
+        if success then
+            LunoLibrary:Notify({
+                Title = "Point Allocated",
+                Content = "Berhasil alokasi 1 poin ke: " .. SelectedStatKey,
+                Duration = 3
+            })
+        else
+            local msg = (result and result.msg) or "Gagal alokasi poin (mungkin poin habis)."
+            LunoLibrary:Notify({
+                Title = "Allocate Failed",
+                Content = msg,
+                Duration = 4
+            })
+        end
+    end
+})
+
+-- Loop khusus Auto Allocate Skill Point
+task.spawn(function()
+    while true do
+        task.wait(1) -- interval fix, tidak bisa diatur user, cegah spam
+
+        if AutoAllocateEnabled then
+            local success, result = TryAllocatePoint(SelectedStatKey)
+
+            if success then
+                LunoLibrary:Notify({
+                    Title = "Point Allocated!",
+                    Content = "Berhasil alokasi 1 poin ke: " .. SelectedStatKey,
+                    Duration = 2
+                })
+            else
+                -- Kalau gagal (poin habis / error lain), langsung matikan Auto Allocate
+                -- baik logic maupun visual toggle-nya biar tidak spam invoke terus.
+                AutoAllocateEnabled = false
+                ForceSetToggleOff(AutoAllocateToggleRef, "AutoAllocateToggle")
+
+                local msg = (result and result.msg) or "Poin sudah habis atau terjadi error."
+                LunoLibrary:Notify({
+                    Title = "Auto Allocate Stopped",
+                    Content = "Auto Allocate dimatikan otomatis.\nAlasan: " .. msg,
                     Duration = 5
                 })
             end
