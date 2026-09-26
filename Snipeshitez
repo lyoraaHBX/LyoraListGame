@@ -120,8 +120,8 @@ local JOBS = {
 
 -- Mapping List untuk Dropdown & Lookup Cepat
 local JobNamesList = {}
-local JobMap = {}       -- displayName -> id
-local JOBS_BY_ID = {}   -- id -> full job data (untuk ambil energy cost dll)
+local JobMap = {}
+local JOBS_BY_ID = {}
 
 for _, job in ipairs(JOBS) do
     local displayName = "[Lv." .. job.level .. "] " .. job.name .. " (E:" .. job.energy .. ")"
@@ -131,8 +131,7 @@ for _, job in ipairs(JOBS) do
 end
 
 -- =========================================================
--- GENERIC UI VALUE READER (LEVEL / ENERGY / HEALTH / STAMINA)
--- Support parsing format "current/max" (ex: "19/20")
+-- GENERIC UI VALUE READER (BACKGROUND ONLY - NO UI BUTTON)
 -- =========================================================
 local function SafeFindPath(pathParts)
     local current = LocalPlayer
@@ -176,10 +175,9 @@ local function ReadNodeValue(node)
 end
 
 -- =========================================================
--- LEVEL MONITOR
+-- LEVEL MONITOR (BACKGROUND - DIPAKAI AUTO JOB, TANPA UI)
 -- =========================================================
 local CurrentDetectedLevel = 1
-local CurrentRawLevelText = "N/A"
 
 local LevelPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "AvatarCard", "AvatarCluster", "AvatarFrame", "LevelBadge"}
 
@@ -191,9 +189,8 @@ local function SetupLevelListener()
     end
 
     local function UpdateLevel()
-        local val, _, raw = ReadNodeValue(levelBadge)
+        local val = ReadNodeValue(levelBadge)
         CurrentDetectedLevel = val
-        CurrentRawLevelText = raw
     end
 
     UpdateLevel()
@@ -229,19 +226,15 @@ local function GetHighestUnlockedJob()
             break
         end
     end
-    return highestJobId, currentLvl, highestJobName, CurrentRawLevelText
+    return highestJobId, currentLvl, highestJobName
 end
 
 -- =========================================================
--- POOLS MONITOR (ENERGY / STAMINA / HEALTH) - VIA UI PATH DIRECT
+-- POOLS MONITOR (BACKGROUND - DIPAKAI AUTO JOB, TANPA UI)
 -- =========================================================
 local CurrentEnergy, MaxEnergy = 0, 0
 local CurrentStamina, MaxStamina = 0, 0
 local CurrentHealth, MaxHealth = 0, 0
-
-local CurrentRawEnergyText = "N/A"
-local CurrentRawStaminaText = "N/A"
-local CurrentRawHealthText = "N/A"
 
 local EnergyPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "BarsCluster", "EnergyBar", "Value"}
 local StaminaPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "BarsCluster", "StaminaBar", "Value"}
@@ -257,8 +250,8 @@ local function SetupBarListener(pathParts, updateCallback)
     end
 
     local function DoUpdate()
-        local val, maxVal, raw = ReadNodeValue(node)
-        updateCallback(val, maxVal, raw)
+        local val, maxVal = ReadNodeValue(node)
+        updateCallback(val, maxVal)
     end
 
     DoUpdate()
@@ -282,22 +275,19 @@ local function SetupBarListener(pathParts, updateCallback)
     end)
 end
 
-SetupBarListener(EnergyPath, function(val, maxVal, raw)
+SetupBarListener(EnergyPath, function(val, maxVal)
     CurrentEnergy = val
     MaxEnergy = maxVal
-    CurrentRawEnergyText = raw
 end)
 
-SetupBarListener(StaminaPath, function(val, maxVal, raw)
+SetupBarListener(StaminaPath, function(val, maxVal)
     CurrentStamina = val
     MaxStamina = maxVal
-    CurrentRawStaminaText = raw
 end)
 
-SetupBarListener(HealthPath, function(val, maxVal, raw)
+SetupBarListener(HealthPath, function(val, maxVal)
     CurrentHealth = val
     MaxHealth = maxVal
-    CurrentRawHealthText = raw
 end)
 
 -- =========================================================
@@ -312,58 +302,8 @@ local Window = LunoLibrary:CreateWindow({
 
 local MainTab = Window:CreateTab("Auto Farm")
 
-MainTab:CreateSection("Level Monitor")
-
-MainTab:CreateButton({
-    Title = "Check Real-Time Level",
-    Callback = function()
-        local jobId, accurateLevel, jobName, rawText = GetHighestUnlockedJob()
-
-        LunoLibrary:Notify({
-            Title = "Level Badge Text Read",
-            Content = "Raw Text: '" .. tostring(rawText) .. "'\nDetected Level: " .. tostring(accurateLevel) .. "\nJob: " .. jobName,
-            Duration = 5
-        })
-    end
-})
-
-MainTab:CreateSection("Pools Monitor (Energy / Stamina / Health)")
-
-MainTab:CreateButton({
-    Title = "Check Real-Time Energy",
-    Callback = function()
-        LunoLibrary:Notify({
-            Title = "Energy Status",
-            Content = "Energy: " .. tostring(CurrentEnergy) .. "/" .. tostring(MaxEnergy) .. "\nRaw Text: '" .. tostring(CurrentRawEnergyText) .. "'",
-            Duration = 4
-        })
-    end
-})
-
-MainTab:CreateButton({
-    Title = "Check Real-Time Stamina",
-    Callback = function()
-        LunoLibrary:Notify({
-            Title = "Stamina Status",
-            Content = "Stamina: " .. tostring(CurrentStamina) .. "/" .. tostring(MaxStamina) .. "\nRaw Text: '" .. tostring(CurrentRawStaminaText) .. "'",
-            Duration = 4
-        })
-    end
-})
-
-MainTab:CreateButton({
-    Title = "Check Real-Time Health",
-    Callback = function()
-        LunoLibrary:Notify({
-            Title = "Health Status",
-            Content = "Health: " .. tostring(CurrentHealth) .. "/" .. tostring(MaxHealth) .. "\nRaw Text: '" .. tostring(CurrentRawHealthText) .. "'",
-            Duration = 4
-        })
-    end
-})
-
 -- =========================================================
--- AUTO JOB CONFIGURATIONS (LOGIC BARU: CEK LEVEL -> CEK ENERGY)
+-- AUTO JOB CONFIGURATIONS (LOGIC: CEK LEVEL -> CEK ENERGY)
 -- =========================================================
 MainTab:CreateSection("Auto Job Configurations")
 
@@ -571,12 +511,12 @@ task.spawn(function()
 end)
 
 -- =========================================================
--- MAIN AUTO JOB LOOP (LOGIC BARU)
+-- MAIN AUTO JOB LOOP
 -- Alur: Cek Level -> Tentukan Job -> Cek Energy -> Invoke (kalau cukup)
 -- Kalau Energy kurang, SKIP tanpa spam invoke, tunggu regen.
 -- Interval check di-fix 1 detik (tidak bisa diatur user).
 -- =========================================================
-local AUTO_JOB_CHECK_INTERVAL = 1 -- fixed, tidak bisa diubah user
+local AUTO_JOB_CHECK_INTERVAL = 1
 
 task.spawn(function()
     while true do
@@ -594,10 +534,7 @@ task.spawn(function()
             local jobInfo = JOBS_BY_ID[targetJobId]
 
             if jobInfo then
-                -- Cek apakah job sudah unlock berdasarkan level (safety check untuk manual select)
                 local levelOk = CurrentDetectedLevel >= jobInfo.level
-
-                -- Cek apakah energy cukup untuk 1x job
                 local energyOk = CurrentEnergy >= jobInfo.energy
 
                 if levelOk and energyOk then
@@ -605,7 +542,6 @@ task.spawn(function()
                         DoJobRemote:InvokeServer(JOB_HASH, targetJobId)
                     end)
                 end
-                -- Kalau levelOk == false atau energyOk == false -> SKIP, tidak invoke apapun (no spam)
             end
         end
     end
