@@ -4,10 +4,15 @@
 local LibraryUrl = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
 local LunoLibrary = loadstring(game:HttpGet(LibraryUrl))()
 
--- 1b. Load Jobs Data Module (via link, sama seperti load Library)
+-- 1b. Load Jobs Data Module
 local JobsDataUrl = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/JobsData.lua"
 local JobsData = loadstring(game:HttpGet(JobsDataUrl))()
 local JOBS = JobsData.JOBS
+
+-- 1c. Load Operations Data Module (BARU)
+local OperationsDataUrl = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/OperationsData.lua"
+local OperationsData = loadstring(game:HttpGet(OperationsDataUrl))()
+local OPERATIONS = OperationsData.OPERATIONS
 
 -- 2. Service & Remotes
 local Players = game:GetService("Players")
@@ -17,7 +22,7 @@ local LocalPlayer = Players.LocalPlayer
 local DoJobRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("DoJob")
 local JOB_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 
--- Mapping List untuk Dropdown & Lookup Cepat
+-- Mapping List untuk Dropdown & Lookup Cepat (JOBS)
 local JobNamesList = {}
 local JobMap = {}
 local JOBS_BY_ID = {}
@@ -27,6 +32,29 @@ for _, job in ipairs(JOBS) do
     table.insert(JobNamesList, displayName)
     JobMap[displayName] = job.id
     JOBS_BY_ID[job.id] = job
+end
+
+-- Mapping List untuk Dropdown & Lookup Cepat (OPERATIONS) -- BARU
+local OperationNamesList = {}
+local OperationMap = {}
+local OPERATIONS_BY_ID = {}
+
+local function FormatDuration(seconds)
+    local hrs = math.floor(seconds / 3600)
+    local mins = math.floor((seconds % 3600) / 60)
+    if hrs > 0 then
+        return hrs .. "h " .. mins .. "m"
+    else
+        return mins .. "m"
+    end
+end
+
+for _, op in ipairs(OPERATIONS) do
+    local lvlTag = op.level and ("[Lv." .. op.level .. "] ") or ""
+    local displayName = lvlTag .. op.name .. " (" .. FormatDuration(op.duration) .. ")"
+    table.insert(OperationNamesList, displayName)
+    OperationMap[displayName] = op.id
+    OPERATIONS_BY_ID[op.id] = op
 end
 
 -- =========================================================
@@ -111,7 +139,6 @@ end
 
 SetupLevelListener()
 
--- Cari job dengan level tertinggi yang <= level saat ini (handle gap level otomatis)
 local function GetHighestUnlockedJob()
     local currentLvl = CurrentDetectedLevel
     local highestJobId = "j_watch"
@@ -203,7 +230,6 @@ local MainTab = Window:CreateTab("Auto Farm")
 
 -- =========================================================
 -- HELPER: Paksa Matikan Toggle UI Secara Visual (Multi Fallback)
--- Dipakai bareng oleh Daily Reward & Auto Allocate & Task system
 -- =========================================================
 local function ForceSetToggleOff(toggleObject, flagName)
     pcall(function()
@@ -293,6 +319,194 @@ MainTab:CreateDropdown({
         end
     end
 })
+
+-- =========================================================
+-- AUTO OPERATIONS SYSTEM (BARU)
+-- Slot: 1-4, tergantung Gamepass. User pilih Max Active Slots.
+-- Slot yang melebihi limit otomatis OFF (visual & logic).
+-- Alur per slot: Start -> Tunggu Durasi -> Collect -> Start Lagi.
+-- Startup check: cek slot 1-4 sekali, siapa tau ada reward tertunda.
+-- =========================================================
+local StartOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("StartOperation")
+local CollectOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("CollectOperation")
+local OPERATION_HASH = "ca01587a32b24eb1a0527e8e595e8483"
+
+local MaxOperationSlots = 1
+
+local OperationSlotState = {}
+for i = 1, 4 do
+    OperationSlotState[i] = {
+        Active = false,       -- apakah operation sedang berjalan di slot ini (local tracking)
+        OpId = OPERATIONS[1].id, -- default operation biar gak nil
+        StartTime = 0,
+        Duration = 0,
+        AutoEnabled = false,
+        ToggleRef = nil,
+    }
+end
+
+local function TryStartOperation(opId)
+    local success, result = pcall(function()
+        return StartOperationRemote:InvokeServer(OPERATION_HASH, opId)
+    end)
+    if success and type(result) == "table" then
+        return result.ok == true, result
+    end
+    return false, nil
+end
+
+local function TryCollectOperation(slotIndex)
+    local success, result = pcall(function()
+        return CollectOperationRemote:InvokeServer(OPERATION_HASH, slotIndex)
+    end)
+    if success and type(result) == "table" then
+        return result.ok == true, result
+    end
+    return false, nil
+end
+
+MainTab:CreateSection("Auto Operations")
+
+MainTab:CreateDropdown({
+    Title = "Max Active Operation Slots (Sesuai Gamepass)",
+    Options = {"1", "2", "3", "4"},
+    Multi = false,
+    Flag = "MaxOperationSlots",
+    Callback = function(Selected)
+        local num = tonumber(Selected) or 1
+        MaxOperationSlots = num
+
+        -- Matikan slot yang melebihi limit baru (visual & logic)
+        for i = 1, 4 do
+            if i > MaxOperationSlots and OperationSlotState[i].AutoEnabled then
+                OperationSlotState[i].AutoEnabled = false
+                ForceSetToggleOff(OperationSlotState[i].ToggleRef, "AutoOperationSlot" .. i .. "Toggle")
+
+                LunoLibrary:Notify({
+                    Title = "Slot " .. i .. " OFF",
+                    Content = "Slot ini melebihi Max Active Slots (" .. MaxOperationSlots .. "). Auto dimatikan otomatis.",
+                    Duration = 3
+                })
+            end
+        end
+    end
+})
+
+for slotIndex = 1, 4 do
+    MainTab:CreateSection("Operation Slot " .. slotIndex)
+
+    MainTab:CreateDropdown({
+        Title = "Select Operation for Slot " .. slotIndex,
+        Options = OperationNamesList,
+        Multi = false,
+        Flag = "SelectedOperationSlot" .. slotIndex,
+        Callback = function(Selected)
+            if OperationMap[Selected] then
+                OperationSlotState[slotIndex].OpId = OperationMap[Selected]
+            end
+        end
+    })
+
+    local toggleRef = MainTab:CreateToggle({
+        Title = "Enable Auto Slot " .. slotIndex,
+        Default = false,
+        Flag = "AutoOperationSlot" .. slotIndex .. "Toggle",
+        Callback = function(Value)
+            -- Kalau slot ini melebihi Max Active Slots, paksa OFF & kasih tau
+            if Value and slotIndex > MaxOperationSlots then
+                LunoLibrary:Notify({
+                    Title = "Slot " .. slotIndex .. " OFF",
+                    Content = "Slot ini melebihi Max Active Slots (" .. MaxOperationSlots .. "). Naikkan limit dulu di dropdown atas.",
+                    Duration = 4
+                })
+                OperationSlotState[slotIndex].AutoEnabled = false
+                ForceSetToggleOff(OperationSlotState[slotIndex].ToggleRef, "AutoOperationSlot" .. slotIndex .. "Toggle")
+                return
+            end
+
+            OperationSlotState[slotIndex].AutoEnabled = Value
+
+            if Value then
+                local opInfo = OPERATIONS_BY_ID[OperationSlotState[slotIndex].OpId]
+                LunoLibrary:Notify({
+                    Title = "Auto Slot " .. slotIndex .. " Started",
+                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih"),
+                    Duration = 3
+                })
+            end
+        end
+    })
+
+    OperationSlotState[slotIndex].ToggleRef = toggleRef
+end
+
+-- Startup check: cek slot 1-4 sekali, siapa tau ada reward tertunda dari sesi sebelumnya
+task.spawn(function()
+    task.wait(3)
+    for i = 1, 4 do
+        local success, result = TryCollectOperation(i)
+        if success then
+            LunoLibrary:Notify({
+                Title = "Operation Collected (Startup Check)",
+                Content = "Slot " .. i .. " ada reward tertunda, berhasil diklaim!\nCash: " .. tostring(result.cash) .. " | XP: " .. tostring(result.xp),
+                Duration = 4
+            })
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- Loop utama Auto Operations (interval 5 detik, tidak spam invoke)
+local OPERATION_CHECK_INTERVAL = 5
+
+task.spawn(function()
+    while true do
+        task.wait(OPERATION_CHECK_INTERVAL)
+
+        for slotIndex = 1, MaxOperationSlots do
+            local slot = OperationSlotState[slotIndex]
+
+            if slot.AutoEnabled then
+                if slot.Active then
+                    -- Cek apakah durasi sudah selesai
+                    if tick() - slot.StartTime >= slot.Duration then
+                        local success, result = TryCollectOperation(slotIndex)
+
+                        if success then
+                            slot.Active = false
+
+                            LunoLibrary:Notify({
+                                Title = "Operation Collected!",
+                                Content = "Slot " .. slotIndex .. " selesai.\nCash: " .. tostring(result.cash) .. " | XP: " .. tostring(result.xp),
+                                Duration = 4
+                            })
+                        end
+                        -- Kalau gagal collect, biarkan Active tetap true, dicek lagi loop berikutnya
+                    end
+                else
+                    -- Belum ada operation jalan, coba start
+                    if slot.OpId then
+                        local success, result = TryStartOperation(slot.OpId)
+
+                        if success then
+                            local opInfo = OPERATIONS_BY_ID[slot.OpId]
+                            slot.Active = true
+                            slot.StartTime = tick()
+                            slot.Duration = opInfo and opInfo.duration or 600
+
+                            LunoLibrary:Notify({
+                                Title = "Operation Started",
+                                Content = "Slot " .. slotIndex .. ": " .. (opInfo and opInfo.name or slot.OpId),
+                                Duration = 3
+                            })
+                        end
+                        -- Kalau gagal start (cash/level kurang), skip, dicoba lagi loop berikutnya
+                    end
+                end
+            end
+        end
+    end
+end)
 
 -- =========================================================
 -- DAILY PLAYTIME REWARD (LADDER CLAIM) SYSTEM
@@ -405,7 +619,7 @@ task.spawn(function()
 
                 LunoLibrary:Notify({
                     Title = "All Daily Rewards Claimed",
-                    Content = "Semua reward 1-5 sudah diklaim. Auto Claim dimatikan otomatis (visual & logic) biar gak lag.",
+                    Content = "Semua reward 1-5 sudah diklaim. Auto Claim dimatikan otomatis.",
                     Duration = 5
                 })
             end
@@ -419,9 +633,8 @@ end)
 local ContractActionRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("ContractAction")
 local CONTRACT_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 
--- ===================== DAILY TASK =====================
 local AutoClaimDailyTaskEnabled = false
-local DailyTaskClaimedStatus = {false, false, false, false, false, false} -- index 1-6
+local DailyTaskClaimedStatus = {false, false, false, false, false, false}
 local AutoClaimDailyTaskToggleRef = nil
 
 local function TryClaimDailyTask(index)
@@ -453,9 +666,8 @@ local function IsAllDailyTaskClaimed()
     return true
 end
 
--- ===================== WEEKLY TASK =====================
 local AutoClaimWeeklyTaskEnabled = false
-local WeeklyTaskClaimedStatus = {false, false, false, false, false, false} -- index 1-6
+local WeeklyTaskClaimedStatus = {false, false, false, false, false, false}
 local AutoClaimWeeklyTaskToggleRef = nil
 
 local function TryClaimWeeklyTask(index)
@@ -487,7 +699,6 @@ local function IsAllWeeklyTaskClaimed()
     return true
 end
 
--- ===================== UI: DAILY TASK =====================
 MainTab:CreateSection("Daily Task")
 
 AutoClaimDailyTaskToggleRef = MainTab:CreateToggle({
@@ -533,7 +744,6 @@ MainTab:CreateButton({
     end
 })
 
--- ===================== UI: WEEKLY TASK =====================
 MainTab:CreateSection("Weekly Task")
 
 AutoClaimWeeklyTaskToggleRef = MainTab:CreateToggle({
@@ -579,7 +789,6 @@ MainTab:CreateButton({
     end
 })
 
--- ===================== LOOP: DAILY TASK =====================
 task.spawn(function()
     while true do
         task.wait(2)
@@ -607,7 +816,7 @@ task.spawn(function()
 
                 LunoLibrary:Notify({
                     Title = "All Daily Task Claimed",
-                    Content = "Semua Daily Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis biar gak lag.",
+                    Content = "Semua Daily Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis.",
                     Duration = 5
                 })
             end
@@ -615,7 +824,6 @@ task.spawn(function()
     end
 end)
 
--- ===================== LOOP: WEEKLY TASK =====================
 task.spawn(function()
     while true do
         task.wait(2)
@@ -643,7 +851,7 @@ task.spawn(function()
 
                 LunoLibrary:Notify({
                     Title = "All Weekly Task Claimed",
-                    Content = "Semua Weekly Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis biar gak lag.",
+                    Content = "Semua Weekly Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis.",
                     Duration = 5
                 })
             end
@@ -657,15 +865,7 @@ end)
 local AllocateSkillPointRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("AllocateSkillPoint")
 local ALLOCATE_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 
--- Mapping Display Name -> Key yang dikirim ke server
-local StatOptionsList = {
-    "Energy",
-    "Stamina",
-    "Health",
-    "Attack",
-    "Defense",
-    "Property Capacity"
-}
+local StatOptionsList = {"Energy", "Stamina", "Health", "Attack", "Defense", "Property Capacity"}
 
 local StatKeyMap = {
     ["Energy"] = "energy",
@@ -748,10 +948,9 @@ MainTab:CreateButton({
     end
 })
 
--- Loop khusus Auto Allocate Skill Point
 task.spawn(function()
     while true do
-        task.wait(1) -- interval fix, tidak bisa diatur user, cegah spam
+        task.wait(1)
 
         if AutoAllocateEnabled then
             local success, result = TryAllocatePoint(SelectedStatKey)
@@ -763,8 +962,6 @@ task.spawn(function()
                     Duration = 2
                 })
             else
-                -- Kalau gagal (poin habis / error lain), langsung matikan Auto Allocate
-                -- baik logic maupun visual toggle-nya biar tidak spam invoke terus.
                 AutoAllocateEnabled = false
                 ForceSetToggleOff(AutoAllocateToggleRef, "AutoAllocateToggle")
 
@@ -781,9 +978,6 @@ end)
 
 -- =========================================================
 -- MAIN AUTO JOB LOOP
--- Alur: Cek Level -> Tentukan Job -> Cek Energy -> Invoke (kalau cukup)
--- Kalau Energy kurang, SKIP tanpa spam invoke, tunggu regen.
--- Interval check di-fix 1 detik (tidak bisa diatur user).
 -- =========================================================
 local AUTO_JOB_CHECK_INTERVAL = 1
 
