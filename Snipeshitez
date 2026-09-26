@@ -9,16 +9,10 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-local MWRemotes = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes")
-local DoJobRemote = MWRemotes:WaitForChild("DoJob")
-local NotifyRemote = MWRemotes:WaitForChild("Notify")
-
+local DoJobRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("DoJob")
 local JOB_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 
--- 3. Cache Level Variables
-local RealTimeLevel = 1
-
--- 4. Data Jobs Complete
+-- 3. Data Jobs Complete
 local JOBS = {
     {id = "j_watch", level = 1, name = "Keep Watch on the Corner"},
     {id = "j_tag", level = 2, name = "Tag Rival Turf"},
@@ -135,78 +129,32 @@ for _, job in ipairs(JOBS) do
 end
 
 -- =========================================================
--- SISTEM DETEKSI LEVEL ULTRA-AKURAT (MULTI-LAYER)
+-- FUNGSI DETEKSI LEVEL REAL-TIME MENGGUNAKAN CONTENTTEXT
 -- =========================================================
-
--- Function Ekstrak Angka dari Teks
-local function ExtractNumber(str)
-    if type(str) == "number" then return str end
-    if type(str) == "string" then
-        local num = string.match(str, "%d+")
-        if num then return tonumber(num) end
-    end
-    return nil
-end
-
--- Layer 1: Deteksi dari PlayerGui
-local function FetchLevelFromGui()
-    local lvl = nil
+local function GetRealTimeLevel()
+    local level = 1
     pcall(function()
         local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-        local levelBadge = playerGui and playerGui.MafiaWarsUI.Root.TopBar.AvatarCard.AvatarCluster.AvatarFrame.LevelBadge
-        if levelBadge and levelBadge.Text then
-            lvl = ExtractNumber(levelBadge.Text)
+        if playerGui then
+            local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
+            local levelBadge = mafiaUI and mafiaUI.Root.TopBar.AvatarCard.AvatarCluster.AvatarFrame:FindFirstChild("LevelBadge")
+            
+            if levelBadge then
+                -- Membaca properti ContentText (jika kosong, fallback ke Text)
+                local contentText = levelBadge.ContentText ~= "" and levelBadge.ContentText or levelBadge.Text
+                local extractedNum = string.match(contentText, "%d+")
+                if extractedNum then
+                    level = tonumber(extractedNum)
+                end
+            end
         end
     end)
-    return lvl
+    return level
 end
 
--- Update Function untuk Sinkronisasi Level
-local function UpdateAccurateLevel()
-    local guiLvl = FetchLevelFromGui()
-    if guiLvl then
-        RealTimeLevel = guiLvl
-    end
-    return RealTimeLevel
-end
-
--- Layer 2: Listening Remote Event "Notify" (Server Event)
-NotifyRemote.OnClientEvent:Connect(function(category, message, data)
-    if category == "level" and type(data) == "table" and data.level then
-        local newLvl = tonumber(data.level)
-        if newLvl then
-            RealTimeLevel = newLvl
-            LunoLibrary:Notify({
-                Title = "LEVEL UP!",
-                Content = "You reached Level " .. tostring(newLvl) .. "!",
-                Duration = 4
-            })
-        end
-    end
-end)
-
--- Layer 3: Dynamic Property Listener ke PlayerGui
-task.spawn(function()
-    pcall(function()
-        local playerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
-        local mafiaUI = playerGui and playerGui:WaitForChild("MafiaWarsUI", 5)
-        local levelBadge = mafiaUI and mafiaUI.Root.TopBar.AvatarCard.AvatarCluster.AvatarFrame:WaitForChild("LevelBadge", 5)
-        
-        if levelBadge then
-            UpdateAccurateLevel()
-            levelBadge:GetPropertyChangedSignal("Text"):Connect(function()
-                UpdateAccurateLevel()
-            end)
-        end
-    end)
-end)
-
--- Fetch Awal saat Script Dijalankan
-UpdateAccurateLevel()
-
--- Function Mendapatkan Job Tertinggi Berdasarkan Level Akurat
+-- Fungsi Mengambil Job Tertinggi Berdasarkan Level Real-Time
 local function GetHighestUnlockedJob()
-    local currentLvl = UpdateAccurateLevel()
+    local currentLvl = GetRealTimeLevel()
     local highestJobId = "j_watch"
     local highestJobName = "Keep Watch on the Corner"
     
@@ -222,7 +170,7 @@ local function GetHighestUnlockedJob()
 end
 
 -- =========================================================
--- USER INTERFACE (LUNO / LYORA X)
+-- UI WINDOW SETUP (LUNO / LYORA X)
 -- =========================================================
 
 local Window = LunoLibrary:CreateWindow({
@@ -233,15 +181,15 @@ local Window = LunoLibrary:CreateWindow({
 
 local MainTab = Window:CreateTab("Auto Farm")
 
-MainTab:CreateSection("Level Status")
+MainTab:CreateSection("Level Monitor")
 
--- TOMBOL KHUSUS NOTIFIKASI LEVEL REAL-TIME
+-- TOMBOL NOTIFIKASI LEVEL REAL-TIME
 MainTab:CreateButton({
     Title = "Check Real-Time Level",
     Callback = function()
-        local jobId, accurateLevel, jobName = GetHighestUnlockedJob()
+        local _, accurateLevel, jobName = GetHighestUnlockedJob()
         LunoLibrary:Notify({
-            Title = "Accurate Level Info",
+            Title = "Real-Time Level Detected",
             Content = "Level: " .. tostring(accurateLevel) .. " | Current Job: " .. jobName,
             Duration = 5
         })
@@ -264,8 +212,8 @@ MainTab:CreateToggle({
         if Value then
             local _, lvl, name = GetHighestUnlockedJob()
             LunoLibrary:Notify({
-                Title = "Auto Job Activated",
-                Content = "Working on [Lv." .. lvl .. "] " .. name,
+                Title = "Auto Job Started",
+                Content = "Current Level: " .. lvl .. " | Active Job: " .. name,
                 Duration = 3
             })
         end
@@ -306,7 +254,7 @@ MainTab:CreateSlider({
 })
 
 -- =========================================================
--- AUTO JOB LOOP
+-- MAIN AUTO JOB LOOP
 -- =========================================================
 task.spawn(function()
     while true do
