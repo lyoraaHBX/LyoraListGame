@@ -129,44 +129,85 @@ for _, job in ipairs(JOBS) do
 end
 
 -- =========================================================
--- FUNGSI MEMBACA PROPERTI LEVELBADGE.TEXT DIRECTLY
+-- REALTIME LEVEL DETECTION (FIXED - via ContentText Attribute)
 -- =========================================================
-local function GetRealTimeLevel()
-    local detectedLevel = 1
-    local rawTextValue = "N/A"
-    
+local CurrentDetectedLevel = 1
+local CurrentRawText = "N/A"
+local LevelBadgeRef = nil
+
+local function TryFindLevelBadge()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if playerGui then
-        local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
-        if mafiaUI then
-            -- Safely Navigating path
-            local root = mafiaUI:FindFirstChild("Root")
-            local topBar = root and root:FindFirstChild("TopBar")
-            local avatarCard = topBar and topBar:FindFirstChild("AvatarCard")
-            local avatarCluster = avatarCard and avatarCard:FindFirstChild("AvatarCluster")
-            local avatarFrame = avatarCluster and avatarCluster:FindFirstChild("AvatarFrame")
-            local levelBadge = avatarFrame and avatarFrame:FindFirstChild("LevelBadge")
-            
-            if levelBadge and levelBadge.Text then
-                rawTextValue = levelBadge.Text
-                -- Konversi teks angka langsung ke number
-                local num = tonumber(rawTextValue) or tonumber(string.match(tostring(rawTextValue), "%d+"))
-                if num then
-                    detectedLevel = num
-                end
-            end
+    local mafiaUI = playerGui and playerGui:FindFirstChild("MafiaWarsUI")
+    local root = mafiaUI and mafiaUI:FindFirstChild("Root")
+    local topBar = root and root:FindFirstChild("TopBar")
+    local avatarCard = topBar and topBar:FindFirstChild("AvatarCard")
+    local avatarCluster = avatarCard and avatarCard:FindFirstChild("AvatarCluster")
+    local avatarFrame = avatarCluster and avatarCluster:FindFirstChild("AvatarFrame")
+    local levelBadge = avatarFrame and avatarFrame:FindFirstChild("LevelBadge")
+    return levelBadge
+end
+
+local function ReadLevelFromBadge(levelBadge)
+    if not levelBadge then return 1, "N/A" end
+
+    local rawTextValue = "N/A"
+
+    -- Prioritas 1: Attribute "ContentText" (realtime, sesuai temuan di Properties)
+    local attrValue = levelBadge:GetAttribute("ContentText")
+    if attrValue ~= nil then
+        rawTextValue = tostring(attrValue)
+    else
+        -- Prioritas 2: Cari child TextLabel di dalam LevelBadge (kalau LevelBadge cuma container)
+        local childText = levelBadge:FindFirstChildOfClass("TextLabel")
+        if childText then
+            rawTextValue = childText.Text
+        elseif levelBadge:IsA("TextLabel") or levelBadge:IsA("TextButton") then
+            -- Prioritas 3: fallback property Text native
+            rawTextValue = levelBadge.Text
         end
     end
-    
-    return detectedLevel, rawTextValue
+
+    local num = tonumber(rawTextValue) or tonumber(string.match(tostring(rawTextValue), "%d+"))
+    return num or 1, rawTextValue
 end
+
+local function SetupLevelListener()
+    local levelBadge = TryFindLevelBadge()
+    if not levelBadge then
+        -- Kalau UI belum load, coba lagi nanti
+        task.delay(2, SetupLevelListener)
+        return
+    end
+
+    LevelBadgeRef = levelBadge
+
+    local function UpdateLevel()
+        local lvl, raw = ReadLevelFromBadge(levelBadge)
+        CurrentDetectedLevel = lvl
+        CurrentRawText = raw
+    end
+
+    UpdateLevel() -- initial read
+
+    -- Listener realtime kalau attribute berubah
+    levelBadge:GetAttributeChangedSignal("ContentText"):Connect(UpdateLevel)
+
+    -- Backup listener kalau ternyata pakai child TextLabel
+    local childText = levelBadge:FindFirstChildOfClass("TextLabel")
+    if childText then
+        childText:GetPropertyChangedSignal("Text"):Connect(UpdateLevel)
+    end
+end
+
+SetupLevelListener()
 
 -- Fungsi Mengambil Job Tertinggi Berdasarkan Level Real-Time
 local function GetHighestUnlockedJob()
-    local currentLvl, rawText = GetRealTimeLevel()
+    local currentLvl = CurrentDetectedLevel
+    local rawText = CurrentRawText
     local highestJobId = "j_watch"
     local highestJobName = "Keep Watch on the Corner"
-    
+
     for _, job in ipairs(JOBS) do
         if currentLvl >= job.level then
             highestJobId = job.id
@@ -192,12 +233,12 @@ local MainTab = Window:CreateTab("Auto Farm")
 
 MainTab:CreateSection("Level Monitor")
 
--- TOMBOL NOTIFIKASI MEMBACA TEXT PROPERTI SECARA REAL-TIME
+-- TOMBOL NOTIFIKASI MEMBACA LEVEL REALTIME (VIA ContentText Attribute)
 MainTab:CreateButton({
     Title = "Check Real-Time Level",
     Callback = function()
         local jobId, accurateLevel, jobName, rawText = GetHighestUnlockedJob()
-        
+
         LunoLibrary:Notify({
             Title = "Level Badge Text Read",
             Content = "Raw Text: '" .. tostring(rawText) .. "'\nDetected Level: " .. tostring(accurateLevel) .. "\nJob: " .. jobName,
@@ -271,7 +312,7 @@ task.spawn(function()
         task.wait(JobDelay)
         if AutoJobEnabled then
             local targetJob = SelectedJobId
-            
+
             if AutoHighestMode then
                 local highestId = GetHighestUnlockedJob()
                 targetJob = highestId
