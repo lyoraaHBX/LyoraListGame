@@ -9,7 +9,7 @@ local JobsDataUrl = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/re
 local JobsData = loadstring(game:HttpGet(JobsDataUrl))()
 local JOBS = JobsData.JOBS
 
--- 1c. Load Operations Data Module (BARU)
+-- 1c. Load Operations Data Module
 local OperationsDataUrl = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/OperationsData.lua"
 local OperationsData = loadstring(game:HttpGet(OperationsDataUrl))()
 local OPERATIONS = OperationsData.OPERATIONS
@@ -34,7 +34,7 @@ for _, job in ipairs(JOBS) do
     JOBS_BY_ID[job.id] = job
 end
 
--- Mapping List untuk Dropdown & Lookup Cepat (OPERATIONS) -- BARU
+-- Mapping List untuk Dropdown & Lookup Cepat (OPERATIONS)
 local OperationNamesList = {}
 local OperationMap = {}
 local OPERATIONS_BY_ID = {}
@@ -227,6 +227,7 @@ local Window = LunoLibrary:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("Auto Farm")
+local OperationsTab = Window:CreateTab("Operations") -- TAB BARU
 
 -- =========================================================
 -- HELPER: Paksa Matikan Toggle UI Secara Visual (Multi Fallback)
@@ -321,11 +322,16 @@ MainTab:CreateDropdown({
 })
 
 -- =========================================================
--- AUTO OPERATIONS SYSTEM (BARU)
--- Slot: 1-4, tergantung Gamepass. User pilih Max Active Slots.
--- Slot yang melebihi limit otomatis OFF (visual & logic).
--- Alur per slot: Start -> Tunggu Durasi -> Collect -> Start Lagi.
--- Startup check: cek slot 1-4 sekali, siapa tau ada reward tertunda.
+-- AUTO OPERATIONS SYSTEM (DI TAB TERPISAH: "Operations")
+--
+-- ALUR PER SLOT (SESUAI PERMINTAAN):
+-- 1. Toggle Enable -> Coba COLLECT dulu (jaga-jaga ada reward nyangkut)
+-- 2. START operation yang dipilih
+-- 3. TUNGGU PERSIS sesuai durasi dari data (misal 600 detik)
+-- 4. COLLECT lagi setelah durasi habis
+-- 5. Ulangi dari langkah 2 (looping) selama toggle masih ON
+--
+-- Slot yang melebihi Max Active Slots otomatis OFF.
 -- =========================================================
 local StartOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("StartOperation")
 local CollectOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("CollectOperation")
@@ -336,11 +342,9 @@ local MaxOperationSlots = 1
 local OperationSlotState = {}
 for i = 1, 4 do
     OperationSlotState[i] = {
-        Active = false,       -- apakah operation sedang berjalan di slot ini (local tracking)
-        OpId = OPERATIONS[1].id, -- default operation biar gak nil
-        StartTime = 0,
-        Duration = 0,
-        AutoEnabled = false,
+        AutoEnabled = false,   -- status toggle user
+        Running = false,       -- apakah coroutine loop sedang jalan (cegah dobel spawn)
+        OpId = OPERATIONS[1].id,
         ToggleRef = nil,
     }
 end
@@ -365,9 +369,9 @@ local function TryCollectOperation(slotIndex)
     return false, nil
 end
 
-MainTab:CreateSection("Auto Operations")
+OperationsTab:CreateSection("Auto Operations")
 
-MainTab:CreateDropdown({
+OperationsTab:CreateDropdown({
     Title = "Max Active Operation Slots (Sesuai Gamepass)",
     Options = {"1", "2", "3", "4"},
     Multi = false,
@@ -392,10 +396,61 @@ MainTab:CreateDropdown({
     end
 })
 
-for slotIndex = 1, 4 do
-    MainTab:CreateSection("Operation Slot " .. slotIndex)
+-- Fungsi utama loop per slot: Collect -> Start -> Wait Durasi -> Ulangi
+local function RunOperationSlotLoop(slotIndex)
+    local slot = OperationSlotState[slotIndex]
 
-    MainTab:CreateDropdown({
+    while slot.AutoEnabled do
+        -- STEP 1: Coba collect dulu (jaga-jaga ada reward nyangkut dari sebelumnya)
+        local collectSuccess, collectResult = TryCollectOperation(slotIndex)
+        if collectSuccess then
+            LunoLibrary:Notify({
+                Title = "Operation Collected!",
+                Content = "Slot " .. slotIndex .. " reward diklaim.\nCash: " .. tostring(collectResult.cash) .. " | XP: " .. tostring(collectResult.xp),
+                Duration = 4
+            })
+        end
+
+        if not slot.AutoEnabled then break end
+
+        -- STEP 2: Start operation baru
+        local opInfo = OPERATIONS_BY_ID[slot.OpId]
+
+        if not opInfo then
+            task.wait(5)
+        else
+            local startSuccess, startResult = TryStartOperation(slot.OpId)
+
+            if startSuccess then
+                LunoLibrary:Notify({
+                    Title = "Operation Started",
+                    Content = "Slot " .. slotIndex .. ": " .. opInfo.name .. " (" .. FormatDuration(opInfo.duration) .. ")",
+                    Duration = 3
+                })
+
+                -- STEP 3: Tunggu PERSIS sesuai durasi data (dipecah per 5 detik biar responsif kalau di-OFF di tengah jalan)
+                local waited = 0
+                while waited < opInfo.duration and slot.AutoEnabled do
+                    local chunk = math.min(5, opInfo.duration - waited)
+                    task.wait(chunk)
+                    waited = waited + chunk
+                end
+
+                -- Loop kembali ke atas -> Collect lagi (STEP 4) kalau masih enabled
+            else
+                -- Gagal start (cash/level kurang, atau slot server masih dipakai job lain), tunggu retry
+                task.wait(5)
+            end
+        end
+    end
+
+    slot.Running = false
+end
+
+for slotIndex = 1, 4 do
+    OperationsTab:CreateSection("Operation Slot " .. slotIndex)
+
+    OperationsTab:CreateDropdown({
         Title = "Select Operation for Slot " .. slotIndex,
         Options = OperationNamesList,
         Multi = false,
@@ -407,11 +462,13 @@ for slotIndex = 1, 4 do
         end
     })
 
-    local toggleRef = MainTab:CreateToggle({
+    local toggleRef = OperationsTab:CreateToggle({
         Title = "Enable Auto Slot " .. slotIndex,
         Default = false,
         Flag = "AutoOperationSlot" .. slotIndex .. "Toggle",
         Callback = function(Value)
+            local slot = OperationSlotState[slotIndex]
+
             -- Kalau slot ini melebihi Max Active Slots, paksa OFF & kasih tau
             if Value and slotIndex > MaxOperationSlots then
                 LunoLibrary:Notify({
@@ -419,94 +476,34 @@ for slotIndex = 1, 4 do
                     Content = "Slot ini melebihi Max Active Slots (" .. MaxOperationSlots .. "). Naikkan limit dulu di dropdown atas.",
                     Duration = 4
                 })
-                OperationSlotState[slotIndex].AutoEnabled = false
-                ForceSetToggleOff(OperationSlotState[slotIndex].ToggleRef, "AutoOperationSlot" .. slotIndex .. "Toggle")
+                slot.AutoEnabled = false
+                ForceSetToggleOff(slot.ToggleRef, "AutoOperationSlot" .. slotIndex .. "Toggle")
                 return
             end
 
-            OperationSlotState[slotIndex].AutoEnabled = Value
+            slot.AutoEnabled = Value
 
             if Value then
-                local opInfo = OPERATIONS_BY_ID[OperationSlotState[slotIndex].OpId]
+                local opInfo = OPERATIONS_BY_ID[slot.OpId]
                 LunoLibrary:Notify({
                     Title = "Auto Slot " .. slotIndex .. " Started",
-                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih"),
+                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih") .. "\nMengecek reward tertunda dulu...",
                     Duration = 3
                 })
+
+                -- Spawn coroutine loop kalau belum jalan (cegah dobel spawn)
+                if not slot.Running then
+                    slot.Running = true
+                    task.spawn(function()
+                        RunOperationSlotLoop(slotIndex)
+                    end)
+                end
             end
         end
     })
 
     OperationSlotState[slotIndex].ToggleRef = toggleRef
 end
-
--- Startup check: cek slot 1-4 sekali, siapa tau ada reward tertunda dari sesi sebelumnya
-task.spawn(function()
-    task.wait(3)
-    for i = 1, 4 do
-        local success, result = TryCollectOperation(i)
-        if success then
-            LunoLibrary:Notify({
-                Title = "Operation Collected (Startup Check)",
-                Content = "Slot " .. i .. " ada reward tertunda, berhasil diklaim!\nCash: " .. tostring(result.cash) .. " | XP: " .. tostring(result.xp),
-                Duration = 4
-            })
-        end
-        task.wait(0.3)
-    end
-end)
-
--- Loop utama Auto Operations (interval 5 detik, tidak spam invoke)
-local OPERATION_CHECK_INTERVAL = 5
-
-task.spawn(function()
-    while true do
-        task.wait(OPERATION_CHECK_INTERVAL)
-
-        for slotIndex = 1, MaxOperationSlots do
-            local slot = OperationSlotState[slotIndex]
-
-            if slot.AutoEnabled then
-                if slot.Active then
-                    -- Cek apakah durasi sudah selesai
-                    if tick() - slot.StartTime >= slot.Duration then
-                        local success, result = TryCollectOperation(slotIndex)
-
-                        if success then
-                            slot.Active = false
-
-                            LunoLibrary:Notify({
-                                Title = "Operation Collected!",
-                                Content = "Slot " .. slotIndex .. " selesai.\nCash: " .. tostring(result.cash) .. " | XP: " .. tostring(result.xp),
-                                Duration = 4
-                            })
-                        end
-                        -- Kalau gagal collect, biarkan Active tetap true, dicek lagi loop berikutnya
-                    end
-                else
-                    -- Belum ada operation jalan, coba start
-                    if slot.OpId then
-                        local success, result = TryStartOperation(slot.OpId)
-
-                        if success then
-                            local opInfo = OPERATIONS_BY_ID[slot.OpId]
-                            slot.Active = true
-                            slot.StartTime = tick()
-                            slot.Duration = opInfo and opInfo.duration or 600
-
-                            LunoLibrary:Notify({
-                                Title = "Operation Started",
-                                Content = "Slot " .. slotIndex .. ": " .. (opInfo and opInfo.name or slot.OpId),
-                                Duration = 3
-                            })
-                        end
-                        -- Kalau gagal start (cash/level kurang), skip, dicoba lagi loop berikutnya
-                    end
-                end
-            end
-        end
-    end
-end)
 
 -- =========================================================
 -- DAILY PLAYTIME REWARD (LADDER CLAIM) SYSTEM
