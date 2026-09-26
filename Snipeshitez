@@ -9,9 +9,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-local MWRemotes = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes")
-local DoJobRemote = MWRemotes:WaitForChild("DoJob")
-local PoolsTickEvent = MWRemotes:WaitForChild("PoolsTick")
+local DoJobRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("DoJob")
 local JOB_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 
 -- 3. Data Jobs Complete
@@ -131,66 +129,71 @@ for _, job in ipairs(JOBS) do
 end
 
 -- =========================================================
--- REALTIME LEVEL DETECTION (FIXED - via ContentText Attribute)
+-- GENERIC UI VALUE READER (LEVEL / ENERGY / HEALTH / STAMINA)
+-- Semua menggunakan teknik yang sama: cek Attribute "ContentText"
+-- lalu fallback ke .Value / .Text native
 -- =========================================================
-local CurrentDetectedLevel = 1
-local CurrentRawText = "N/A"
-
-local function TryFindLevelBadge()
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    local mafiaUI = playerGui and playerGui:FindFirstChild("MafiaWarsUI")
-    local root = mafiaUI and mafiaUI:FindFirstChild("Root")
-    local topBar = root and root:FindFirstChild("TopBar")
-    local avatarCard = topBar and topBar:FindFirstChild("AvatarCard")
-    local avatarCluster = avatarCard and avatarCard:FindFirstChild("AvatarCluster")
-    local avatarFrame = avatarCluster and avatarCluster:FindFirstChild("AvatarFrame")
-    local levelBadge = avatarFrame and avatarFrame:FindFirstChild("LevelBadge")
-    return levelBadge
+local function SafeFindPath(pathParts)
+    local current = LocalPlayer
+    for _, partName in ipairs(pathParts) do
+        if not current then return nil end
+        current = current:FindFirstChild(partName)
+    end
+    return current
 end
 
-local function ReadLevelFromBadge(levelBadge)
-    if not levelBadge then return 1, "N/A" end
+local function ReadNodeValue(node)
+    if not node then return 0, "N/A" end
 
-    local rawTextValue = "N/A"
+    local rawValue = "N/A"
 
-    -- Prioritas 1: Attribute "ContentText" (realtime, sesuai Properties panel)
-    local attrValue = levelBadge:GetAttribute("ContentText")
+    -- Prioritas 1: Attribute "ContentText" (realtime, sama seperti LevelBadge)
+    local attrValue = node:GetAttribute("ContentText")
     if attrValue ~= nil then
-        rawTextValue = tostring(attrValue)
+        rawValue = tostring(attrValue)
+    elseif node:IsA("ValueBase") then
+        -- Prioritas 2: kalau node adalah NumberValue/IntValue/StringValue asli
+        rawValue = tostring(node.Value)
+    elseif node:IsA("TextLabel") or node:IsA("TextButton") then
+        -- Prioritas 3: fallback property Text native
+        rawValue = node.Text
     else
-        -- Prioritas 2: Cari child TextLabel di dalam LevelBadge
-        local childText = levelBadge:FindFirstChildOfClass("TextLabel")
+        -- Prioritas 4: coba cari child TextLabel di dalamnya
+        local childText = node:FindFirstChildOfClass("TextLabel")
         if childText then
-            rawTextValue = childText.Text
-        elseif levelBadge:IsA("TextLabel") or levelBadge:IsA("TextButton") then
-            -- Prioritas 3: fallback property Text native
-            rawTextValue = levelBadge.Text
+            rawValue = childText.Text
         end
     end
 
-    local num = tonumber(rawTextValue) or tonumber(string.match(tostring(rawTextValue), "%d+"))
-    return num or 1, rawTextValue
+    local num = tonumber(rawValue) or tonumber(string.match(tostring(rawValue), "%-?%d+"))
+    return num or 0, rawValue
 end
 
+-- =========================================================
+-- LEVEL MONITOR
+-- =========================================================
+local CurrentDetectedLevel = 1
+local CurrentRawLevelText = "N/A"
+
+local LevelPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "AvatarCard", "AvatarCluster", "AvatarFrame", "LevelBadge"}
+
 local function SetupLevelListener()
-    local levelBadge = TryFindLevelBadge()
+    local levelBadge = SafeFindPath(LevelPath)
     if not levelBadge then
         task.delay(2, SetupLevelListener)
         return
     end
 
     local function UpdateLevel()
-        local lvl, raw = ReadLevelFromBadge(levelBadge)
-        CurrentDetectedLevel = lvl
-        CurrentRawText = raw
+        local val, raw = ReadNodeValue(levelBadge)
+        CurrentDetectedLevel = val
+        CurrentRawLevelText = raw
     end
 
-    UpdateLevel() -- initial read
+    UpdateLevel()
 
-    -- Listener realtime kalau attribute berubah
     levelBadge:GetAttributeChangedSignal("ContentText"):Connect(UpdateLevel)
 
-    -- Backup listener kalau ternyata pakai child TextLabel
     local childText = levelBadge:FindFirstChildOfClass("TextLabel")
     if childText then
         childText:GetPropertyChangedSignal("Text"):Connect(UpdateLevel)
@@ -199,10 +202,8 @@ end
 
 SetupLevelListener()
 
--- Fungsi Mengambil Job Tertinggi Berdasarkan Level Real-Time
 local function GetHighestUnlockedJob()
     local currentLvl = CurrentDetectedLevel
-    local rawText = CurrentRawText
     local highestJobId = "j_watch"
     local highestJobName = "Keep Watch on the Corner"
 
@@ -214,65 +215,69 @@ local function GetHighestUnlockedJob()
             break
         end
     end
-    return highestJobId, currentLvl, highestJobName, rawText
+    return highestJobId, currentLvl, highestJobName, CurrentRawLevelText
 end
 
 -- =========================================================
--- POOLS MONITOR (ENERGY / STAMINA / HEAL) - REALTIME
+-- POOLS MONITOR (ENERGY / STAMINA / HEALTH) - VIA UI PATH DIRECT
 -- =========================================================
 local CurrentEnergy = 0
 local CurrentStamina = 0
-local CurrentHeal = 0
-local LastRawArgs = {}
+local CurrentHealth = 0
 
-local function UpdatePoolsFromArgs(...)
-    local args = {...}
-    LastRawArgs = args
+local CurrentRawEnergyText = "N/A"
+local CurrentRawStaminaText = "N/A"
+local CurrentRawHealthText = "N/A"
 
-    -- Case 1: Server kirim table tunggal { Energy = .., Stamina = .., Heal = .. }
-    if type(args[1]) == "table" then
-        local data = args[1]
-        for key, value in pairs(data) do
-            local lowerKey = string.lower(tostring(key))
-            if lowerKey:find("energy") then
-                CurrentEnergy = value
-            elseif lowerKey:find("stamina") then
-                CurrentStamina = value
-            elseif lowerKey:find("heal") or lowerKey:find("health") then
-                CurrentHeal = value
-            end
-        end
+local EnergyPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "BarsCluster", "EnergyBar", "Value"}
+local StaminaPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "BarsCluster", "StaminaBar", "Value"}
+local HealthPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "BarsCluster", "HealthBar", "Value"}
+
+local function SetupBarListener(pathParts, updateCallback)
+    local node = SafeFindPath(pathParts)
+    if not node then
+        task.delay(2, function()
+            SetupBarListener(pathParts, updateCallback)
+        end)
         return
     end
 
-    -- Case 2: Server kirim positional angka berurutan (energy, stamina, heal)
-    if type(args[1]) == "number" then
-        if args[1] ~= nil then CurrentEnergy = args[1] end
-        if args[2] ~= nil then CurrentStamina = args[2] end
-        if args[3] ~= nil then CurrentHeal = args[3] end
-        return
+    local function DoUpdate()
+        local val, raw = ReadNodeValue(node)
+        updateCallback(val, raw)
     end
 
-    -- Case 3: Server kirim pasangan value, key, value, key, ...
-    local i = 1
-    while i <= #args do
-        local val = args[i]
-        local key = args[i + 1]
-        if type(val) == "number" and type(key) == "string" then
-            local lowerKey = string.lower(key)
-            if lowerKey:find("energy") then
-                CurrentEnergy = val
-            elseif lowerKey:find("stamina") then
-                CurrentStamina = val
-            elseif lowerKey:find("heal") or lowerKey:find("health") then
-                CurrentHeal = val
-            end
-        end
-        i = i + 2
+    DoUpdate()
+
+    -- Listener realtime via ContentText Attribute
+    node:GetAttributeChangedSignal("ContentText"):Connect(DoUpdate)
+
+    -- Backup listener kalau node adalah ValueBase (NumberValue/IntValue/StringValue)
+    if node:IsA("ValueBase") then
+        node:GetPropertyChangedSignal("Value"):Connect(DoUpdate)
+    end
+
+    -- Backup listener kalau ada child TextLabel
+    local childText = node:FindFirstChildOfClass("TextLabel")
+    if childText then
+        childText:GetPropertyChangedSignal("Text"):Connect(DoUpdate)
     end
 end
 
-PoolsTickEvent.OnClientEvent:Connect(UpdatePoolsFromArgs)
+SetupBarListener(EnergyPath, function(val, raw)
+    CurrentEnergy = val
+    CurrentRawEnergyText = raw
+end)
+
+SetupBarListener(StaminaPath, function(val, raw)
+    CurrentStamina = val
+    CurrentRawStaminaText = raw
+end)
+
+SetupBarListener(HealthPath, function(val, raw)
+    CurrentHealth = val
+    CurrentRawHealthText = raw
+end)
 
 -- =========================================================
 -- UI WINDOW SETUP (LUNO / LYORA X)
@@ -288,7 +293,6 @@ local MainTab = Window:CreateTab("Auto Farm")
 
 MainTab:CreateSection("Level Monitor")
 
--- TOMBOL NOTIFIKASI MEMBACA LEVEL REALTIME (VIA ContentText Attribute)
 MainTab:CreateButton({
     Title = "Check Real-Time Level",
     Callback = function()
@@ -302,14 +306,14 @@ MainTab:CreateButton({
     end
 })
 
-MainTab:CreateSection("Pools Monitor (Energy / Stamina / Heal)")
+MainTab:CreateSection("Pools Monitor (Energy / Stamina / Health)")
 
 MainTab:CreateButton({
     Title = "Check Real-Time Energy",
     Callback = function()
         LunoLibrary:Notify({
             Title = "Energy Status",
-            Content = "Current Energy: " .. tostring(CurrentEnergy),
+            Content = "Raw Text: '" .. tostring(CurrentRawEnergyText) .. "'\nCurrent Energy: " .. tostring(CurrentEnergy),
             Duration = 4
         })
     end
@@ -320,36 +324,19 @@ MainTab:CreateButton({
     Callback = function()
         LunoLibrary:Notify({
             Title = "Stamina Status",
-            Content = "Current Stamina: " .. tostring(CurrentStamina),
+            Content = "Raw Text: '" .. tostring(CurrentRawStaminaText) .. "'\nCurrent Stamina: " .. tostring(CurrentStamina),
             Duration = 4
         })
     end
 })
 
 MainTab:CreateButton({
-    Title = "Check Real-Time Heal",
+    Title = "Check Real-Time Health",
     Callback = function()
         LunoLibrary:Notify({
-            Title = "Heal Status",
-            Content = "Current Heal: " .. tostring(CurrentHeal),
+            Title = "Health Status",
+            Content = "Raw Text: '" .. tostring(CurrentRawHealthText) .. "'\nCurrent Health: " .. tostring(CurrentHealth),
             Duration = 4
-        })
-    end
-})
-
-MainTab:CreateButton({
-    Title = "Debug: Dump Raw PoolsTick Data",
-    Callback = function()
-        local dump = ""
-        for idx, v in ipairs(LastRawArgs) do
-            dump = dump .. "[" .. idx .. "] " .. tostring(v) .. " (" .. type(v) .. ")\n"
-        end
-        if dump == "" then dump = "Belum ada data masuk dari PoolsTick." end
-
-        LunoLibrary:Notify({
-            Title = "Raw PoolsTick Args",
-            Content = dump,
-            Duration = 8
         })
     end
 })
