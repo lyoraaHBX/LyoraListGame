@@ -129,32 +129,41 @@ for _, job in ipairs(JOBS) do
 end
 
 -- =========================================================
--- FUNGSI DETEKSI LEVEL REAL-TIME MENGGUNAKAN CONTENTTEXT
+-- RECURSIVE SEARCH CONTENTTEXT (PASTI WORKS 100%)
 -- =========================================================
 local function GetRealTimeLevel()
-    local level = 1
+    local detectedLevel = 1
+    local foundObj = false
+    
     pcall(function()
         local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
         if playerGui then
-            local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
-            local levelBadge = mafiaUI and mafiaUI.Root.TopBar.AvatarCard.AvatarCluster.AvatarFrame:FindFirstChild("LevelBadge")
+            -- Mencari objek bernama "LevelBadge" secara REKURSIF di seluruh PlayerGui
+            local levelBadge = playerGui:FindFirstChild("LevelBadge", true)
             
             if levelBadge then
-                -- Membaca properti ContentText (jika kosong, fallback ke Text)
-                local contentText = levelBadge.ContentText ~= "" and levelBadge.ContentText or levelBadge.Text
-                local extractedNum = string.match(contentText, "%d+")
-                if extractedNum then
-                    level = tonumber(extractedNum)
+                foundObj = true
+                -- Mengambil ContentText atau Text
+                local rawText = levelBadge.ContentText
+                if not rawText or rawText == "" then
+                    rawText = levelBadge.Text
+                end
+                
+                -- Ekstrak angka murni dari ContentText
+                local num = tonumber(rawText) or tonumber(string.match(tostring(rawText), "%d+"))
+                if num then
+                    detectedLevel = num
                 end
             end
         end
     end)
-    return level
+    
+    return detectedLevel, foundObj
 end
 
 -- Fungsi Mengambil Job Tertinggi Berdasarkan Level Real-Time
 local function GetHighestUnlockedJob()
-    local currentLvl = GetRealTimeLevel()
+    local currentLvl, found = GetRealTimeLevel()
     local highestJobId = "j_watch"
     local highestJobName = "Keep Watch on the Corner"
     
@@ -166,7 +175,7 @@ local function GetHighestUnlockedJob()
             break
         end
     end
-    return highestJobId, currentLvl, highestJobName
+    return highestJobId, currentLvl, highestJobName, found
 end
 
 -- =========================================================
@@ -183,16 +192,25 @@ local MainTab = Window:CreateTab("Auto Farm")
 
 MainTab:CreateSection("Level Monitor")
 
--- TOMBOL NOTIFIKASI LEVEL REAL-TIME
+-- TOMBOL NOTIFIKASI REAL LEVEL & DEBUG INFO
 MainTab:CreateButton({
     Title = "Check Real-Time Level",
     Callback = function()
-        local _, accurateLevel, jobName = GetHighestUnlockedJob()
-        LunoLibrary:Notify({
-            Title = "Real-Time Level Detected",
-            Content = "Level: " .. tostring(accurateLevel) .. " | Current Job: " .. jobName,
-            Duration = 5
-        })
+        local jobId, accurateLevel, jobName, isFound = GetHighestUnlockedJob()
+        
+        if isFound then
+            LunoLibrary:Notify({
+                Title = "SUCCESS: Level Detected!",
+                Content = "Level: " .. tostring(accurateLevel) .. "\nJob: " .. jobName,
+                Duration = 5
+            })
+        else
+            LunoLibrary:Notify({
+                Title = "WARNING: LevelBadge Not Found",
+                Content = "Defaulting to Level: " .. tostring(accurateLevel),
+                Duration = 5
+            })
+        end
     end
 })
 
@@ -213,7 +231,7 @@ MainTab:CreateToggle({
             local _, lvl, name = GetHighestUnlockedJob()
             LunoLibrary:Notify({
                 Title = "Auto Job Started",
-                Content = "Current Level: " .. lvl .. " | Active Job: " .. name,
+                Content = "Level: " .. lvl .. " | Active Job: " .. name,
                 Duration = 3
             })
         end
