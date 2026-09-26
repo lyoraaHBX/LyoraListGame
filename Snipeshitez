@@ -129,41 +129,41 @@ for _, job in ipairs(JOBS) do
 end
 
 -- =========================================================
--- RECURSIVE SEARCH CONTENTTEXT (PASTI WORKS 100%)
+-- FUNGSI MEMBACA PROPERTI LEVELBADGE.TEXT DIRECTLY
 -- =========================================================
 local function GetRealTimeLevel()
     local detectedLevel = 1
-    local foundObj = false
+    local rawTextValue = "N/A"
     
-    pcall(function()
-        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-        if playerGui then
-            -- Mencari objek bernama "LevelBadge" secara REKURSIF di seluruh PlayerGui
-            local levelBadge = playerGui:FindFirstChild("LevelBadge", true)
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if playerGui then
+        local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
+        if mafiaUI then
+            -- Safely Navigating path
+            local root = mafiaUI:FindFirstChild("Root")
+            local topBar = root and root:FindFirstChild("TopBar")
+            local avatarCard = topBar and topBar:FindFirstChild("AvatarCard")
+            local avatarCluster = avatarCard and avatarCard:FindFirstChild("AvatarCluster")
+            local avatarFrame = avatarCluster and avatarCluster:FindFirstChild("AvatarFrame")
+            local levelBadge = avatarFrame and avatarFrame:FindFirstChild("LevelBadge")
             
-            if levelBadge then
-                foundObj = true
-                -- Mengambil ContentText atau Text
-                local rawText = levelBadge.ContentText
-                if not rawText or rawText == "" then
-                    rawText = levelBadge.Text
-                end
-                
-                -- Ekstrak angka murni dari ContentText
-                local num = tonumber(rawText) or tonumber(string.match(tostring(rawText), "%d+"))
+            if levelBadge and levelBadge.Text then
+                rawTextValue = levelBadge.Text
+                -- Konversi teks angka langsung ke number
+                local num = tonumber(rawTextValue) or tonumber(string.match(tostring(rawTextValue), "%d+"))
                 if num then
                     detectedLevel = num
                 end
             end
         end
-    end)
+    end
     
-    return detectedLevel, foundObj
+    return detectedLevel, rawTextValue
 end
 
 -- Fungsi Mengambil Job Tertinggi Berdasarkan Level Real-Time
 local function GetHighestUnlockedJob()
-    local currentLvl, found = GetRealTimeLevel()
+    local currentLvl, rawText = GetRealTimeLevel()
     local highestJobId = "j_watch"
     local highestJobName = "Keep Watch on the Corner"
     
@@ -175,7 +175,7 @@ local function GetHighestUnlockedJob()
             break
         end
     end
-    return highestJobId, currentLvl, highestJobName, found
+    return highestJobId, currentLvl, highestJobName, rawText
 end
 
 -- =========================================================
@@ -192,25 +192,17 @@ local MainTab = Window:CreateTab("Auto Farm")
 
 MainTab:CreateSection("Level Monitor")
 
--- TOMBOL NOTIFIKASI REAL LEVEL & DEBUG INFO
+-- TOMBOL NOTIFIKASI MEMBACA TEXT PROPERTI SECARA REAL-TIME
 MainTab:CreateButton({
     Title = "Check Real-Time Level",
     Callback = function()
-        local jobId, accurateLevel, jobName, isFound = GetHighestUnlockedJob()
+        local jobId, accurateLevel, jobName, rawText = GetHighestUnlockedJob()
         
-        if isFound then
-            LunoLibrary:Notify({
-                Title = "SUCCESS: Level Detected!",
-                Content = "Level: " .. tostring(accurateLevel) .. "\nJob: " .. jobName,
-                Duration = 5
-            })
-        else
-            LunoLibrary:Notify({
-                Title = "WARNING: LevelBadge Not Found",
-                Content = "Defaulting to Level: " .. tostring(accurateLevel),
-                Duration = 5
-            })
-        end
+        LunoLibrary:Notify({
+            Title = "Level Badge Text Read",
+            Content = "Raw Text: '" .. tostring(rawText) .. "'\nDetected Level: " .. tostring(accurateLevel) .. "\nJob: " .. jobName,
+            Duration = 5
+        })
     end
 })
 
@@ -231,7 +223,7 @@ MainTab:CreateToggle({
             local _, lvl, name = GetHighestUnlockedJob()
             LunoLibrary:Notify({
                 Title = "Auto Job Started",
-                Content = "Level: " .. lvl .. " | Active Job: " .. name,
+                Content = "Current Level: " .. lvl .. "\nWorking on: " .. name,
                 Duration = 3
             })
         end
