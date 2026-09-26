@@ -146,18 +146,14 @@ local function ReadNodeValue(node)
 
     local rawValue = "N/A"
 
-    -- Prioritas 1: Attribute "ContentText" (realtime, sama seperti LevelBadge)
     local attrValue = node:GetAttribute("ContentText")
     if attrValue ~= nil then
         rawValue = tostring(attrValue)
     elseif node:IsA("ValueBase") then
-        -- Prioritas 2: kalau node adalah NumberValue/IntValue/StringValue asli
         rawValue = tostring(node.Value)
     elseif node:IsA("TextLabel") or node:IsA("TextButton") then
-        -- Prioritas 3: fallback property Text native
         rawValue = node.Text
     else
-        -- Prioritas 4: coba cari child TextLabel di dalamnya
         local childText = node:FindFirstChildOfClass("TextLabel")
         if childText then
             rawValue = childText.Text
@@ -170,7 +166,7 @@ local function ReadNodeValue(node)
         return tonumber(current), tonumber(max), rawValue
     end
 
-    -- Fallback kalau cuma ada 1 angka (misal buat Level yang gak ada format "/")
+    -- Fallback kalau cuma ada 1 angka
     local single = tonumber(rawValue) or tonumber(string.match(tostring(rawValue), "%-?%d+"))
     if single then
         return single, single, rawValue
@@ -209,7 +205,6 @@ local function SetupLevelListener()
         childText:GetPropertyChangedSignal("Text"):Connect(UpdateLevel)
     end
 
-    -- Polling tambahan biar tetap ke-detect realtime
     task.spawn(function()
         while levelBadge and levelBadge.Parent do
             UpdateLevel()
@@ -267,21 +262,17 @@ local function SetupBarListener(pathParts, updateCallback)
 
     DoUpdate()
 
-    -- Listener realtime via ContentText Attribute
     node:GetAttributeChangedSignal("ContentText"):Connect(DoUpdate)
 
-    -- Backup listener kalau node adalah ValueBase (NumberValue/IntValue/StringValue)
     if node:IsA("ValueBase") then
         node:GetPropertyChangedSignal("Value"):Connect(DoUpdate)
     end
 
-    -- Backup listener kalau ada child TextLabel
     local childText = node:FindFirstChildOfClass("TextLabel")
     if childText then
         childText:GetPropertyChangedSignal("Text"):Connect(DoUpdate)
     end
 
-    -- Polling tambahan biar TETAP ke-detect realtime walau signal ga fire
     task.spawn(function()
         while node and node.Parent do
             DoUpdate()
@@ -377,7 +368,7 @@ local AutoHighestMode = true
 local SelectedJobId = "j_watch"
 local JobDelay = 0.5
 
-MainTab:CreateToggle({
+local AutoJobToggleRef = MainTab:CreateToggle({
     Title = "Enable Auto Job",
     Default = false,
     Flag = "AutoJobToggle",
@@ -426,6 +417,188 @@ MainTab:CreateSlider({
         JobDelay = Value
     end
 })
+
+-- =========================================================
+-- DAILY PLAYTIME REWARD (LADDER CLAIM) SYSTEM
+-- =========================================================
+local ClaimLadderRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("ClaimLadder")
+local LADDER_HASH = "ca01587a32b24eb1a0527e8e595e8483"
+
+local AutoClaimEnabled = false
+local ClaimedStatus = {false, false, false, false, false} -- index 1 s/d 5
+local AutoClaimToggleRef = nil -- akan diisi setelah toggle dibuat
+
+-- =========================================================
+-- HELPER: Paksa Matikan Toggle UI Secara Visual (Multi Fallback)
+-- Karena API pasti dari Lyora X tidak diketahui, kita coba
+-- beberapa pattern umum yang biasa dipakai UI Library Roblox
+-- =========================================================
+local function ForceSetToggleOff(toggleObject, flagName)
+    -- Pattern 1: toggleObject:Set(false)
+    pcall(function()
+        if toggleObject and toggleObject.Set then
+            toggleObject:Set(false)
+        end
+    end)
+
+    -- Pattern 2: toggleObject:SetValue(false)
+    pcall(function()
+        if toggleObject and toggleObject.SetValue then
+            toggleObject:SetValue(false)
+        end
+    end)
+
+    -- Pattern 3: toggleObject:Toggle(false)
+    pcall(function()
+        if toggleObject and toggleObject.Toggle then
+            toggleObject:Toggle(false)
+        end
+    end)
+
+    -- Pattern 4: toggleObject.Value = false (property langsung)
+    pcall(function()
+        if toggleObject then
+            toggleObject.Value = false
+        end
+    end)
+
+    -- Pattern 5: Update via Library Flags table (misal LunoLibrary.Flags[flagName])
+    pcall(function()
+        if LunoLibrary.Flags and LunoLibrary.Flags[flagName] ~= nil then
+            if type(LunoLibrary.Flags[flagName]) == "table" then
+                LunoLibrary.Flags[flagName].Value = false
+            else
+                LunoLibrary.Flags[flagName] = false
+            end
+        end
+    end)
+
+    -- Pattern 6: Library punya method global SetFlag
+    pcall(function()
+        if LunoLibrary.SetFlag then
+            LunoLibrary:SetFlag(flagName, false)
+        end
+    end)
+
+    -- Pattern 7: Library punya method global UpdateToggle
+    pcall(function()
+        if LunoLibrary.UpdateToggle then
+            LunoLibrary:UpdateToggle(flagName, false)
+        end
+    end)
+end
+
+local function TryClaimReward(index)
+    local success, result = pcall(function()
+        return ClaimLadderRemote:InvokeServer(LADDER_HASH, index)
+    end)
+
+    if success and type(result) == "table" then
+        if result.ok == true then
+            ClaimedStatus[index] = true
+            return true, result
+        else
+            if result.msg and string.find(tostring(result.msg), "Already claimed") then
+                ClaimedStatus[index] = true
+            end
+            return false, result
+        end
+    end
+
+    return false, nil
+end
+
+local function IsAllRewardsClaimed()
+    for i = 1, 5 do
+        if not ClaimedStatus[i] then
+            return false
+        end
+    end
+    return true
+end
+
+MainTab:CreateSection("Daily Playtime Reward")
+
+AutoClaimToggleRef = MainTab:CreateToggle({
+    Title = "Auto Claim Daily Playtime Reward",
+    Default = false,
+    Flag = "AutoClaimLadderToggle",
+    Callback = function(Value)
+        AutoClaimEnabled = Value
+        if Value then
+            LunoLibrary:Notify({
+                Title = "Auto Claim Started",
+                Content = "Sedang mengecek Daily Playtime Reward 1-5...",
+                Duration = 3
+            })
+        end
+    end
+})
+
+MainTab:CreateButton({
+    Title = "Claim All Available Rewards Now",
+    Callback = function()
+        local claimedCount = 0
+        for i = 1, 5 do
+            if not ClaimedStatus[i] then
+                local success = TryClaimReward(i)
+                if success then
+                    claimedCount = claimedCount + 1
+                end
+                task.wait(0.5)
+            end
+        end
+
+        LunoLibrary:Notify({
+            Title = "Claim Selesai",
+            Content = "Berhasil claim " .. claimedCount .. " reward baru.",
+            Duration = 4
+        })
+
+        if IsAllRewardsClaimed() then
+            AutoClaimEnabled = false
+            ForceSetToggleOff(AutoClaimToggleRef, "AutoClaimLadderToggle")
+        end
+    end
+})
+
+-- Loop khusus Auto Claim Daily Reward
+task.spawn(function()
+    while true do
+        task.wait(1.5)
+
+        if AutoClaimEnabled then
+            for i = 1, 5 do
+                if not ClaimedStatus[i] then
+                    local success, result = TryClaimReward(i)
+
+                    if success then
+                        LunoLibrary:Notify({
+                            Title = "Daily Reward Claimed!",
+                            Content = "Berhasil claim reward Day " .. i .. ".",
+                            Duration = 3
+                        })
+                    end
+
+                    task.wait(0.5) -- jeda antar claim biar gak spam remote
+                end
+            end
+
+            -- Kalau semua reward (1-5) sudah claimed / sudah pernah diklaim
+            -- matikan Auto Claim baik secara logic maupun visual toggle UI
+            if IsAllRewardsClaimed() then
+                AutoClaimEnabled = false
+                ForceSetToggleOff(AutoClaimToggleRef, "AutoClaimLadderToggle")
+
+                LunoLibrary:Notify({
+                    Title = "All Daily Rewards Claimed",
+                    Content = "Semua reward 1-5 sudah diklaim. Auto Claim dimatikan otomatis (visual & logic) biar gak lag.",
+                    Duration = 5
+                })
+            end
+        end
+    end
+end)
 
 -- =========================================================
 -- MAIN AUTO JOB LOOP
