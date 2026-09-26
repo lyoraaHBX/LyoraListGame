@@ -203,7 +203,7 @@ local MainTab = Window:CreateTab("Auto Farm")
 
 -- =========================================================
 -- HELPER: Paksa Matikan Toggle UI Secara Visual (Multi Fallback)
--- Dipakai bareng oleh Daily Reward & Auto Allocate system
+-- Dipakai bareng oleh Daily Reward & Auto Allocate & Task system
 -- =========================================================
 local function ForceSetToggleOff(toggleObject, flagName)
     pcall(function()
@@ -382,7 +382,7 @@ task.spawn(function()
     while true do
         task.wait(1.5)
 
-        if AutoClaimEnabled then
+        if AutoClaimEnabled and not IsAllRewardsClaimed() then
             for i = 1, 5 do
                 if not ClaimedStatus[i] then
                     local success, result = TryClaimReward(i)
@@ -406,6 +406,244 @@ task.spawn(function()
                 LunoLibrary:Notify({
                     Title = "All Daily Rewards Claimed",
                     Content = "Semua reward 1-5 sudah diklaim. Auto Claim dimatikan otomatis (visual & logic) biar gak lag.",
+                    Duration = 5
+                })
+            end
+        end
+    end
+end)
+
+-- =========================================================
+-- DAILY TASK & WEEKLY TASK (CONTRACT ACTION) SYSTEM
+-- =========================================================
+local ContractActionRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("ContractAction")
+local CONTRACT_HASH = "ca01587a32b24eb1a0527e8e595e8483"
+
+-- ===================== DAILY TASK =====================
+local AutoClaimDailyTaskEnabled = false
+local DailyTaskClaimedStatus = {false, false, false, false, false, false} -- index 1-6
+local AutoClaimDailyTaskToggleRef = nil
+
+local function TryClaimDailyTask(index)
+    local success, result = pcall(function()
+        return ContractActionRemote:InvokeServer(CONTRACT_HASH, "claim", index, nil)
+    end)
+
+    if success and type(result) == "table" then
+        if result.ok == true then
+            DailyTaskClaimedStatus[index] = true
+            return true, result
+        else
+            if result.msg and string.find(tostring(result.msg), "Already claimed") then
+                DailyTaskClaimedStatus[index] = true
+            end
+            return false, result
+        end
+    end
+
+    return false, nil
+end
+
+local function IsAllDailyTaskClaimed()
+    for i = 1, 6 do
+        if not DailyTaskClaimedStatus[i] then
+            return false
+        end
+    end
+    return true
+end
+
+-- ===================== WEEKLY TASK =====================
+local AutoClaimWeeklyTaskEnabled = false
+local WeeklyTaskClaimedStatus = {false, false, false, false, false, false} -- index 1-6
+local AutoClaimWeeklyTaskToggleRef = nil
+
+local function TryClaimWeeklyTask(index)
+    local success, result = pcall(function()
+        return ContractActionRemote:InvokeServer(CONTRACT_HASH, "claimweekly", index, nil)
+    end)
+
+    if success and type(result) == "table" then
+        if result.ok == true then
+            WeeklyTaskClaimedStatus[index] = true
+            return true, result
+        else
+            if result.msg and string.find(tostring(result.msg), "Already claimed") then
+                WeeklyTaskClaimedStatus[index] = true
+            end
+            return false, result
+        end
+    end
+
+    return false, nil
+end
+
+local function IsAllWeeklyTaskClaimed()
+    for i = 1, 6 do
+        if not WeeklyTaskClaimedStatus[i] then
+            return false
+        end
+    end
+    return true
+end
+
+-- ===================== UI: DAILY TASK =====================
+MainTab:CreateSection("Daily Task")
+
+AutoClaimDailyTaskToggleRef = MainTab:CreateToggle({
+    Title = "Auto Claim Daily Task",
+    Default = false,
+    Flag = "AutoClaimDailyTaskToggle",
+    Callback = function(Value)
+        AutoClaimDailyTaskEnabled = Value
+        if Value then
+            LunoLibrary:Notify({
+                Title = "Auto Claim Daily Task Started",
+                Content = "Sedang mengecek Daily Task 1-6...",
+                Duration = 3
+            })
+        end
+    end
+})
+
+MainTab:CreateButton({
+    Title = "Claim All Available Daily Task Now",
+    Callback = function()
+        local claimedCount = 0
+        for i = 1, 6 do
+            if not DailyTaskClaimedStatus[i] then
+                local success = TryClaimDailyTask(i)
+                if success then
+                    claimedCount = claimedCount + 1
+                end
+                task.wait(0.5)
+            end
+        end
+
+        LunoLibrary:Notify({
+            Title = "Claim Daily Task Selesai",
+            Content = "Berhasil claim " .. claimedCount .. " task baru.",
+            Duration = 4
+        })
+
+        if IsAllDailyTaskClaimed() then
+            AutoClaimDailyTaskEnabled = false
+            ForceSetToggleOff(AutoClaimDailyTaskToggleRef, "AutoClaimDailyTaskToggle")
+        end
+    end
+})
+
+-- ===================== UI: WEEKLY TASK =====================
+MainTab:CreateSection("Weekly Task")
+
+AutoClaimWeeklyTaskToggleRef = MainTab:CreateToggle({
+    Title = "Auto Claim Weekly Task",
+    Default = false,
+    Flag = "AutoClaimWeeklyTaskToggle",
+    Callback = function(Value)
+        AutoClaimWeeklyTaskEnabled = Value
+        if Value then
+            LunoLibrary:Notify({
+                Title = "Auto Claim Weekly Task Started",
+                Content = "Sedang mengecek Weekly Task 1-6...",
+                Duration = 3
+            })
+        end
+    end
+})
+
+MainTab:CreateButton({
+    Title = "Claim All Available Weekly Task Now",
+    Callback = function()
+        local claimedCount = 0
+        for i = 1, 6 do
+            if not WeeklyTaskClaimedStatus[i] then
+                local success = TryClaimWeeklyTask(i)
+                if success then
+                    claimedCount = claimedCount + 1
+                end
+                task.wait(0.5)
+            end
+        end
+
+        LunoLibrary:Notify({
+            Title = "Claim Weekly Task Selesai",
+            Content = "Berhasil claim " .. claimedCount .. " task baru.",
+            Duration = 4
+        })
+
+        if IsAllWeeklyTaskClaimed() then
+            AutoClaimWeeklyTaskEnabled = false
+            ForceSetToggleOff(AutoClaimWeeklyTaskToggleRef, "AutoClaimWeeklyTaskToggle")
+        end
+    end
+})
+
+-- ===================== LOOP: DAILY TASK =====================
+task.spawn(function()
+    while true do
+        task.wait(2)
+
+        if AutoClaimDailyTaskEnabled and not IsAllDailyTaskClaimed() then
+            for i = 1, 6 do
+                if not DailyTaskClaimedStatus[i] then
+                    local success, result = TryClaimDailyTask(i)
+
+                    if success then
+                        LunoLibrary:Notify({
+                            Title = "Daily Task Claimed!",
+                            Content = "Berhasil claim Daily Task #" .. i .. ".",
+                            Duration = 3
+                        })
+                    end
+
+                    task.wait(0.5)
+                end
+            end
+
+            if IsAllDailyTaskClaimed() then
+                AutoClaimDailyTaskEnabled = false
+                ForceSetToggleOff(AutoClaimDailyTaskToggleRef, "AutoClaimDailyTaskToggle")
+
+                LunoLibrary:Notify({
+                    Title = "All Daily Task Claimed",
+                    Content = "Semua Daily Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis biar gak lag.",
+                    Duration = 5
+                })
+            end
+        end
+    end
+end)
+
+-- ===================== LOOP: WEEKLY TASK =====================
+task.spawn(function()
+    while true do
+        task.wait(2)
+
+        if AutoClaimWeeklyTaskEnabled and not IsAllWeeklyTaskClaimed() then
+            for i = 1, 6 do
+                if not WeeklyTaskClaimedStatus[i] then
+                    local success, result = TryClaimWeeklyTask(i)
+
+                    if success then
+                        LunoLibrary:Notify({
+                            Title = "Weekly Task Claimed!",
+                            Content = "Berhasil claim Weekly Task #" .. i .. ".",
+                            Duration = 3
+                        })
+                    end
+
+                    task.wait(0.5)
+                end
+            end
+
+            if IsAllWeeklyTaskClaimed() then
+                AutoClaimWeeklyTaskEnabled = false
+                ForceSetToggleOff(AutoClaimWeeklyTaskToggleRef, "AutoClaimWeeklyTaskToggle")
+
+                LunoLibrary:Notify({
+                    Title = "All Weekly Task Claimed",
+                    Content = "Semua Weekly Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis biar gak lag.",
                     Duration = 5
                 })
             end
