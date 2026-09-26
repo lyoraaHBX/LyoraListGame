@@ -12,120 +12,122 @@ local LocalPlayer = Players.LocalPlayer
 local DoJobRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("DoJob")
 local JOB_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 
--- 3. Data Jobs Complete
+-- 3. Data Jobs Complete (dengan Energy Cost, Cash, XP, DropChance, DropPool)
 local JOBS = {
-    {id = "j_watch", level = 1, name = "Keep Watch on the Corner"},
-    {id = "j_tag", level = 2, name = "Tag Rival Turf"},
-    {id = "j_boost", level = 3, name = "Boost a Parked Car"},
-    {id = "j_shake", level = 4, name = "Shake Down the Newsstand"},
-    {id = "j_fence", level = 5, name = "Fence Fake Watches"},
-    {id = "j_rough", level = 6, name = "Rough Up a Pickpocket"},
-    {id = "j_hijack", level = 8, name = "Hijack a Delivery Truck"},
-    {id = "j_chop", level = 9, name = "Run the Chop Shop Night Shift"},
-    {id = "j_bribe", level = 10, name = "Bribe a Dock Inspector"},
-    {id = "j_pawn", level = 12, name = "Rob the Pawn Shop Safe"},
-    {id = "j_forge", level = 14, name = "Forge Gallery Paintings"},
-    {id = "j_torch", level = 16, name = "Torch a Rival's Warehouse"},
-    {id = "j_vault", level = 18, name = "Crack the Vault at First National"},
-    {id = "j_convoy", level = 20, name = "Ambush the Kovac Convoy"},
-    {id = "j_union", level = 22, name = "Rig the Union Election"},
-    {id = "j_gala", level = 24, name = "Heist the Museum Gala"},
-    {id = "j_witness", level = 26, name = "Silence a Witness"},
-    {id = "j_waterfront", level = 28, name = "Take Over the Waterfront"},
-    {id = "j_contraband", level = 30, name = "Smuggle Contraband Past the Coast Guard"},
-    {id = "j_cane", level = 32, name = "Shake Down the Cane Fields"},
-    {id = "j_races", level = 34, name = "Rig the Marina Boat Races"},
-    {id = "j_speedboat", level = 36, name = "Hijack a Smuggler's Speedboat"},
-    {id = "j_harbormaster", level = 38, name = "Bribe the Harbor Master"},
-    {id = "j_ferry", level = 40, name = "Rob the Gold Bullion Ferry"},
-    {id = "j_guns", level = 42, name = "Run a Convoy to the Rebels"},
-    {id = "j_aide", level = 44, name = "Blackmail the Governor's Aide"},
-    {id = "j_sugar", level = 46, name = "Heist the Sugar Baron's Vault"},
-    {id = "j_fleet", level = 48, name = "Sink a Rival Smuggler's Fleet"},
-    {id = "j_grandcasino", level = 50, name = "Seize the Grand Pavilion"},
-    {id = "j_islandtrade", level = 52, name = "Take Over the Island Trade"},
-    {id = "j_depot", level = 54, name = "Raid an Abandoned Supply Depot"},
-    {id = "j_boxing", level = 56, name = "Fix the Underground Boxing Circuit"},
-    {id = "j_icehouse", level = 58, name = "Shake Down the Icehouse District"},
-    {id = "j_railyard", level = 60, name = "Bribe the Rail Yard Commissar"},
-    {id = "j_icetrucks", level = 62, name = "Steal Kovac's Ice Trucks"},
-    {id = "j_socialclub", level = 64, name = "Torch the Kolyev Social Club"},
-    {id = "j_statebank", level = 66, name = "Rob the State Bank of Volkovsk"},
-    {id = "j_courier", level = 68, name = "Ambush the Diamond Courier Train"},
-    {id = "j_prosecutor", level = 70, name = "Silence the Prosecutor General"},
-    {id = "j_auction", level = 72, name = "Heist the Winter Palace Auction"},
-    {id = "j_blockade", level = 74, name = "Break the Kovac Blockade"},
-    {id = "j_underworld", level = 76, name = "Take Over the Volkovsk Underworld"},
-    {id = "j_jade", level = 78, name = "Smuggle Jade Through Customs"},
-    {id = "j_dragonden", level = 80, name = "Fix the Dragon Den Prizefights"},
-    {id = "j_nightmarket", level = 82, name = "Shake Down the Night Market"},
-    {id = "j_freighter", level = 84, name = "Hijack a Freighter of Counterfeits"},
-    {id = "j_captains", level = 86, name = "Bribe the Jade Court Captains"},
-    {id = "j_goldenlotus", level = 88, name = "Rob the Golden Lotus Vault"},
-    {id = "j_jadeseal", level = 90, name = "Steal the Emperor's Jade Seal"},
-    {id = "j_summit", level = 92, name = "Ambush the Jade Court Summit"},
-    {id = "j_floatingpalace", level = 94, name = "Heist the Floating Palace"},
-    {id = "j_heir", level = 96, name = "Silence the Dragon Head's Heir"},
-    {id = "j_rivalfleet", level = 98, name = "Burn the Rival Fleet at Anchor"},
-    {id = "j_jadeharbor", level = 100, name = "Take Over Jade Harbor"},
-    {id = "j_precinct", level = 102, name = "Pay Off the Precinct Captains"},
-    {id = "j_records", level = 104, name = "Burgle the Records Hall"},
-    {id = "j_councilman", level = 106, name = "Blackmail a City Councilman"},
-    {id = "j_docket", level = 108, name = "Steal the Court Docket"},
-    {id = "j_herald", level = 110, name = "Plant a Story in the Morning Herald"},
-    {id = "j_election", level = 112, name = "Rig the Council Election"},
-    {id = "j_starwitness", level = 114, name = "Buy Off the Star Witness"},
-    {id = "j_archive", level = 116, name = "Break Into the Chancellery Archive"},
-    {id = "j_bench", level = 118, name = "Bribe the Supreme Bench"},
-    {id = "j_bullion", level = 120, name = "Swap the Mint's Bullion"},
-    {id = "j_ledgers", level = 122, name = "Seize the Sterling Ledgers"},
-    {id = "j_charter", level = 124, name = "Claim the Charter Seat"},
-    {id = "j_tollpass", level = 126, name = "Bribe the Mountain Toll Wardens"},
-    {id = "j_goldrun", level = 128, name = "Smuggle Gold Over the High Pass"},
-    {id = "j_numbered", level = 130, name = "Forge a Numbered Account"},
-    {id = "j_goldtrain", level = 132, name = "Rob the Alpine Gold Train"},
-    {id = "j_cables", level = 134, name = "Intercept the Courier Cables"},
-    {id = "j_chamberseat", level = 136, name = "Buy a Seat at the Chamber Table"},
-    {id = "j_vaults", level = 138, name = "Crack the Numbered Vaults"},
-    {id = "j_sealforge", level = 140, name = "Counterfeit the Chamber Seals"},
-    {id = "j_vaultkeys", level = 142, name = "Ransom the Vault Governor's Keys"},
-    {id = "j_express", level = 144, name = "Derail the Chairman's Express"},
-    {id = "j_freeze", level = 146, name = "Freeze the Chamber's Accounts"},
-    {id = "j_chairman", level = 148, name = "Take the Chairman's Seat"},
-    {id = "j_oldharbor", level = 150, name = "Bribe the Old Harbor Master"},
-    {id = "j_ferryledger", level = 152, name = "Steal the Ferryman's Ledger"},
-    {id = "j_olivepress", level = 154, name = "Shake Down the Olive Press Barons"},
-    {id = "j_cliffcourier", level = 156, name = "Rob the Cliffside Courier"},
-    {id = "j_processions", level = 158, name = "Extort the Procession Road Tolls"},
-    {id = "j_eldersaudience", level = 160, name = "Buy an Audience with the Elders"},
-    {id = "j_turncapos", level = 162, name = "Turn the First Family's Capos"},
-    {id = "j_familytreasury", level = 164, name = "Raid the First Family's Treasury"},
-    {id = "j_bookofoaths", level = 166, name = "Steal the Book of Oaths"},
-    {id = "j_quarries", level = 168, name = "Corner the Marble Quarries"},
-    {id = "j_councilsecrets", level = 170, name = "Expose the Elder Council's Secrets"},
-    {id = "j_firstseat", level = 172, name = "Take the First Seat"},
-    {id = "j_tollmen", level = 174, name = "Bribe the Roadwarden's Tollmen"},
-    {id = "j_caravanledger", level = 176, name = "Follow the Caravan Ledger"},
-    {id = "j_sealcisterns", level = 178, name = "Seal the Cisterns"},
-    {id = "j_caravanring", level = 180, name = "Break the Caravanserai Ring"},
-    {id = "j_cisternkeys", level = 182, name = "Steal the Cistern Keys"},
-    {id = "j_irongate", level = 184, name = "Force the Iron Gate"},
-    {id = "j_scribes", level = 186, name = "Turn the Keeper's Scribes"},
-    {id = "j_grudgeledger", level = 188, name = "Burn the Ledger of Grudges"},
-    {id = "j_citadelstair", level = 190, name = "Hold the Citadel Stair"},
-    {id = "j_unswcouncil", level = 192, name = "Unseat the Unsworn Council"},
-    {id = "j_caradinering", level = 194, name = "Break Caradine's Ring"},
-    {id = "j_rewriteoath", level = 196, name = "Rewrite the Oath"}
+    {id = "j_watch", tier = 1, level = 1, name = "Keep Watch on the Corner", energy = 1, cash = 60, xp = 2, dropChance = 0.025, dropPool = "pool_t1"},
+    {id = "j_tag", tier = 1, level = 2, name = "Tag Rival Turf", energy = 2, cash = 120, xp = 4, dropChance = 0.025, dropPool = "pool_t1"},
+    {id = "j_boost", tier = 1, level = 3, name = "Boost a Parked Car", energy = 3, cash = 200, xp = 7, dropChance = 0.03, dropPool = "pool_t1"},
+    {id = "j_shake", tier = 1, level = 4, name = "Shake Down the Newsstand", energy = 3, cash = 230, xp = 7, dropChance = 0.03, dropPool = "pool_t1"},
+    {id = "j_fence", tier = 1, level = 5, name = "Fence Fake Watches", energy = 4, cash = 320, xp = 10, dropChance = 0.035, dropPool = "pool_t1"},
+    {id = "j_rough", tier = 1, level = 6, name = "Rough Up a Pickpocket", energy = 5, cash = 450, xp = 13, dropChance = 0.04, dropPool = "pool_t1"},
+    {id = "j_hijack", tier = 2, level = 8, name = "Hijack a Delivery Truck", energy = 6, cash = 900, xp = 18, dropChance = 0.03, dropPool = "pool_t2"},
+    {id = "j_chop", tier = 2, level = 9, name = "Run the Chop Shop Night Shift", energy = 7, cash = 1100, xp = 22, dropChance = 0.03, dropPool = "pool_t2"},
+    {id = "j_bribe", tier = 2, level = 10, name = "Bribe a Dock Inspector", energy = 8, cash = 1350, xp = 26, dropChance = 0.035, dropPool = "pool_t2"},
+    {id = "j_pawn", tier = 2, level = 12, name = "Rob the Pawn Shop Safe", energy = 9, cash = 1600, xp = 30, dropChance = 0.035, dropPool = "pool_t2"},
+    {id = "j_forge", tier = 2, level = 14, name = "Forge Gallery Paintings", energy = 10, cash = 2000, xp = 35, dropChance = 0.04, dropPool = "pool_t2"},
+    {id = "j_torch", tier = 2, level = 16, name = "Torch a Rival's Warehouse", energy = 12, cash = 2600, xp = 42, dropChance = 0.045, dropPool = "pool_t2"},
+    {id = "j_vault", tier = 3, level = 18, name = "Crack the Vault at First National", energy = 14, cash = 4200, xp = 55, dropChance = 0.035, dropPool = "pool_t3"},
+    {id = "j_convoy", tier = 3, level = 20, name = "Ambush the Kovac Convoy", energy = 16, cash = 5100, xp = 65, dropChance = 0.04, dropPool = "pool_t3"},
+    {id = "j_union", tier = 3, level = 22, name = "Rig the Union Election", energy = 18, cash = 6200, xp = 75, dropChance = 0.04, dropPool = "pool_t3"},
+    {id = "j_gala", tier = 3, level = 24, name = "Heist the Museum Gala", energy = 20, cash = 7300, xp = 85, dropChance = 0.045, dropPool = "pool_t3"},
+    {id = "j_witness", tier = 3, level = 26, name = "Silence a Witness", energy = 22, cash = 8400, xp = 95, dropChance = 0.045, dropPool = "pool_t3"},
+    {id = "j_waterfront", tier = 3, level = 28, name = "Take Over the Waterfront", energy = 24, cash = 9500, xp = 110, dropChance = 0.05, dropPool = "pool_t3"},
+    {id = "j_contraband", tier = 4, level = 30, name = "Smuggle Contraband Past the Coast Guard", energy = 26, cash = 15000, xp = 130, dropChance = 0.03, dropPool = "pool_t4"},
+    {id = "j_cane", tier = 4, level = 32, name = "Shake Down the Cane Fields", energy = 27, cash = 16500, xp = 140, dropChance = 0.03, dropPool = "pool_t4"},
+    {id = "j_races", tier = 4, level = 34, name = "Rig the Marina Boat Races", energy = 28, cash = 18000, xp = 150, dropChance = 0.035, dropPool = "pool_t4"},
+    {id = "j_speedboat", tier = 4, level = 36, name = "Hijack a Smuggler's Speedboat", energy = 30, cash = 20500, xp = 165, dropChance = 0.035, dropPool = "pool_t4"},
+    {id = "j_harbormaster", tier = 4, level = 38, name = "Bribe the Harbor Master", energy = 32, cash = 22500, xp = 180, dropChance = 0.04, dropPool = "pool_t4"},
+    {id = "j_ferry", tier = 4, level = 40, name = "Rob the Gold Bullion Ferry", energy = 34, cash = 25500, xp = 200, dropChance = 0.045, dropPool = "pool_t4"},
+    {id = "j_guns", tier = 5, level = 42, name = "Run a Convoy to the Rebels", energy = 36, cash = 33000, xp = 220, dropChance = 0.035, dropPool = "pool_t5"},
+    {id = "j_aide", tier = 5, level = 44, name = "Blackmail the Governor's Aide", energy = 37, cash = 35500, xp = 230, dropChance = 0.035, dropPool = "pool_t5"},
+    {id = "j_sugar", tier = 5, level = 46, name = "Heist the Sugar Baron's Vault", energy = 38, cash = 38000, xp = 245, dropChance = 0.04, dropPool = "pool_t5"},
+    {id = "j_fleet", tier = 5, level = 48, name = "Sink a Rival Smuggler's Fleet", energy = 40, cash = 42000, xp = 260, dropChance = 0.04, dropPool = "pool_t5"},
+    {id = "j_grandcasino", tier = 5, level = 50, name = "Seize the Grand Pavilion", energy = 42, cash = 46000, xp = 280, dropChance = 0.045, dropPool = "pool_t5"},
+    {id = "j_islandtrade", tier = 5, level = 52, name = "Take Over the Island Trade", energy = 44, cash = 50500, xp = 300, dropChance = 0.05, dropPool = "pool_t5"},
+    {id = "j_depot", tier = 6, level = 54, name = "Raid an Abandoned Supply Depot", energy = 46, cash = 65000, xp = 330, dropChance = 0.035, dropPool = "pool_t6"},
+    {id = "j_boxing", tier = 6, level = 56, name = "Fix the Underground Boxing Circuit", energy = 47, cash = 69000, xp = 345, dropChance = 0.035, dropPool = "pool_t6"},
+    {id = "j_icehouse", tier = 6, level = 58, name = "Shake Down the Icehouse District", energy = 48, cash = 73000, xp = 360, dropChance = 0.04, dropPool = "pool_t6"},
+    {id = "j_railyard", tier = 6, level = 60, name = "Bribe the Rail Yard Commissar", energy = 50, cash = 79000, xp = 380, dropChance = 0.04, dropPool = "pool_t6"},
+    {id = "j_icetrucks", tier = 6, level = 62, name = "Steal Kovac's Ice Trucks", energy = 52, cash = 85000, xp = 400, dropChance = 0.045, dropPool = "pool_t6"},
+    {id = "j_socialclub", tier = 6, level = 64, name = "Torch the Kolyev Social Club", energy = 54, cash = 92000, xp = 425, dropChance = 0.05, dropPool = "pool_t6"},
+    {id = "j_statebank", tier = 7, level = 66, name = "Rob the State Bank of Volkovsk", energy = 55, cash = 120000, xp = 450, dropChance = 0.035, dropPool = "pool_t7"},
+    {id = "j_courier", tier = 7, level = 68, name = "Ambush the Diamond Courier Train", energy = 56, cash = 126000, xp = 465, dropChance = 0.035, dropPool = "pool_t7"},
+    {id = "j_prosecutor", tier = 7, level = 70, name = "Silence the Prosecutor General", energy = 57, cash = 132000, xp = 480, dropChance = 0.04, dropPool = "pool_t7"},
+    {id = "j_auction", tier = 7, level = 72, name = "Heist the Winter Palace Auction", energy = 58, cash = 140000, xp = 500, dropChance = 0.04, dropPool = "pool_t7"},
+    {id = "j_blockade", tier = 7, level = 74, name = "Break the Kovac Blockade", energy = 60, cash = 150000, xp = 525, dropChance = 0.045, dropPool = "pool_t7"},
+    {id = "j_underworld", tier = 7, level = 76, name = "Take Over the Volkovsk Underworld", energy = 62, cash = 160000, xp = 550, dropChance = 0.05, dropPool = "pool_t7"},
+    {id = "j_jade", tier = 8, level = 78, name = "Smuggle Jade Through Customs", energy = 64, cash = 210000, xp = 590, dropChance = 0.035, dropPool = "pool_t8"},
+    {id = "j_dragonden", tier = 8, level = 80, name = "Fix the Dragon Den Prizefights", energy = 65, cash = 218000, xp = 610, dropChance = 0.035, dropPool = "pool_t8"},
+    {id = "j_nightmarket", tier = 8, level = 82, name = "Shake Down the Night Market", energy = 66, cash = 228000, xp = 630, dropChance = 0.04, dropPool = "pool_t8"},
+    {id = "j_freighter", tier = 8, level = 84, name = "Hijack a Freighter of Counterfeits", energy = 68, cash = 242000, xp = 655, dropChance = 0.04, dropPool = "pool_t8"},
+    {id = "j_captains", tier = 8, level = 86, name = "Bribe the Jade Court Captains", energy = 70, cash = 256000, xp = 680, dropChance = 0.045, dropPool = "pool_t8"},
+    {id = "j_goldenlotus", tier = 8, level = 88, name = "Rob the Golden Lotus Vault", energy = 72, cash = 272000, xp = 710, dropChance = 0.05, dropPool = "pool_t8"},
+    {id = "j_jadeseal", tier = 9, level = 90, name = "Steal the Emperor's Jade Seal", energy = 74, cash = 355000, xp = 755, dropChance = 0.035, dropPool = "pool_t9"},
+    {id = "j_summit", tier = 9, level = 92, name = "Ambush the Jade Court Summit", energy = 75, cash = 368000, xp = 775, dropChance = 0.04, dropPool = "pool_t9"},
+    {id = "j_floatingpalace", tier = 9, level = 94, name = "Heist the Floating Palace", energy = 76, cash = 382000, xp = 800, dropChance = 0.04, dropPool = "pool_t9"},
+    {id = "j_heir", tier = 9, level = 96, name = "Silence the Dragon Head's Heir", energy = 78, cash = 402000, xp = 830, dropChance = 0.045, dropPool = "pool_t9"},
+    {id = "j_rivalfleet", tier = 9, level = 98, name = "Burn the Rival Fleet at Anchor", energy = 80, cash = 425000, xp = 865, dropChance = 0.045, dropPool = "pool_t9"},
+    {id = "j_jadeharbor", tier = 9, level = 100, name = "Take Over Jade Harbor", energy = 82, cash = 450000, xp = 900, dropChance = 0.05, dropPool = "pool_t9"},
+    {id = "j_precinct", tier = 10, level = 102, name = "Pay Off the Precinct Captains", energy = 84, cash = 560000, xp = 960, dropChance = 0.035, dropPool = "pool_t10"},
+    {id = "j_records", tier = 10, level = 104, name = "Burgle the Records Hall", energy = 85, cash = 585000, xp = 985, dropChance = 0.035, dropPool = "pool_t10"},
+    {id = "j_councilman", tier = 10, level = 106, name = "Blackmail a City Councilman", energy = 86, cash = 610000, xp = 1015, dropChance = 0.04, dropPool = "pool_t10"},
+    {id = "j_docket", tier = 10, level = 108, name = "Steal the Court Docket", energy = 88, cash = 640000, xp = 1050, dropChance = 0.04, dropPool = "pool_t10"},
+    {id = "j_herald", tier = 10, level = 110, name = "Plant a Story in the Morning Herald", energy = 90, cash = 670000, xp = 1090, dropChance = 0.045, dropPool = "pool_t10"},
+    {id = "j_election", tier = 10, level = 112, name = "Rig the Council Election", energy = 92, cash = 705000, xp = 1135, dropChance = 0.05, dropPool = "pool_t10"},
+    {id = "j_starwitness", tier = 11, level = 114, name = "Buy Off the Star Witness", energy = 94, cash = 880000, xp = 1220, dropChance = 0.035, dropPool = "pool_t11"},
+    {id = "j_archive", tier = 11, level = 116, name = "Break Into the Chancellery Archive", energy = 96, cash = 920000, xp = 1260, dropChance = 0.04, dropPool = "pool_t11"},
+    {id = "j_bench", tier = 11, level = 118, name = "Bribe the Supreme Bench", energy = 98, cash = 965000, xp = 1310, dropChance = 0.04, dropPool = "pool_t11"},
+    {id = "j_bullion", tier = 11, level = 120, name = "Swap the Mint's Bullion", energy = 100, cash = 1015000, xp = 1365, dropChance = 0.045, dropPool = "pool_t11"},
+    {id = "j_ledgers", tier = 11, level = 122, name = "Seize the Sterling Ledgers", energy = 102, cash = 1070000, xp = 1420, dropChance = 0.045, dropPool = "pool_t11"},
+    {id = "j_charter", tier = 11, level = 124, name = "Claim the Charter Seat", energy = 104, cash = 1130000, xp = 1480, dropChance = 0.05, dropPool = "pool_t11"},
+    {id = "j_tollpass", tier = 12, level = 126, name = "Bribe the Mountain Toll Wardens", energy = 106, cash = 1400000, xp = 1560, dropChance = 0.035, dropPool = "pool_t12"},
+    {id = "j_goldrun", tier = 12, level = 128, name = "Smuggle Gold Over the High Pass", energy = 108, cash = 1470000, xp = 1620, dropChance = 0.035, dropPool = "pool_t12"},
+    {id = "j_numbered", tier = 12, level = 130, name = "Forge a Numbered Account", energy = 110, cash = 1540000, xp = 1680, dropChance = 0.04, dropPool = "pool_t12"},
+    {id = "j_goldtrain", tier = 12, level = 132, name = "Rob the Alpine Gold Train", energy = 112, cash = 1620000, xp = 1740, dropChance = 0.04, dropPool = "pool_t12"},
+    {id = "j_cables", tier = 12, level = 134, name = "Intercept the Courier Cables", energy = 114, cash = 1700000, xp = 1800, dropChance = 0.045, dropPool = "pool_t12"},
+    {id = "j_chamberseat", tier = 12, level = 136, name = "Buy a Seat at the Chamber Table", energy = 116, cash = 1780000, xp = 1860, dropChance = 0.045, dropPool = "pool_t12"},
+    {id = "j_vaults", tier = 13, level = 138, name = "Crack the Numbered Vaults", energy = 118, cash = 2200000, xp = 1950, dropChance = 0.035, dropPool = "pool_t13"},
+    {id = "j_sealforge", tier = 13, level = 140, name = "Counterfeit the Chamber Seals", energy = 120, cash = 2320000, xp = 2010, dropChance = 0.04, dropPool = "pool_t13"},
+    {id = "j_vaultkeys", tier = 13, level = 142, name = "Ransom the Vault Governor's Keys", energy = 122, cash = 2450000, xp = 2070, dropChance = 0.04, dropPool = "pool_t13"},
+    {id = "j_express", tier = 13, level = 144, name = "Derail the Chairman's Express", energy = 124, cash = 2580000, xp = 2140, dropChance = 0.045, dropPool = "pool_t13"},
+    {id = "j_freeze", tier = 13, level = 146, name = "Freeze the Chamber's Accounts", energy = 126, cash = 2710000, xp = 2210, dropChance = 0.045, dropPool = "pool_t13"},
+    {id = "j_chairman", tier = 13, level = 148, name = "Take the Chairman's Seat", energy = 128, cash = 2850000, xp = 2280, dropChance = 0.05, dropPool = "pool_t13"},
+    {id = "j_oldharbor", tier = 14, level = 150, name = "Bribe the Old Harbor Master", energy = 130, cash = 3050000, xp = 2400, dropChance = 0.035, dropPool = "pool_t14"},
+    {id = "j_ferryledger", tier = 14, level = 152, name = "Steal the Ferryman's Ledger", energy = 132, cash = 3300000, xp = 2470, dropChance = 0.04, dropPool = "pool_t14"},
+    {id = "j_olivepress", tier = 14, level = 154, name = "Shake Down the Olive Press Barons", energy = 134, cash = 3600000, xp = 2540, dropChance = 0.04, dropPool = "pool_t14"},
+    {id = "j_cliffcourier", tier = 14, level = 156, name = "Rob the Cliffside Courier", energy = 136, cash = 3900000, xp = 2610, dropChance = 0.045, dropPool = "pool_t14"},
+    {id = "j_processions", tier = 14, level = 158, name = "Extort the Procession Road Tolls", energy = 138, cash = 4200000, xp = 2690, dropChance = 0.045, dropPool = "pool_t14"},
+    {id = "j_eldersaudience", tier = 14, level = 160, name = "Buy an Audience with the Elders", energy = 140, cash = 4550000, xp = 2760, dropChance = 0.05, dropPool = "pool_t14"},
+    {id = "j_turncapos", tier = 15, level = 162, name = "Turn the First Family's Capos", energy = 142, cash = 4900000, xp = 2900, dropChance = 0.035, dropPool = "pool_t15"},
+    {id = "j_familytreasury", tier = 15, level = 164, name = "Raid the First Family's Treasury", energy = 144, cash = 5300000, xp = 2980, dropChance = 0.04, dropPool = "pool_t15"},
+    {id = "j_bookofoaths", tier = 15, level = 166, name = "Steal the Book of Oaths", energy = 146, cash = 5750000, xp = 3060, dropChance = 0.04, dropPool = "pool_t15"},
+    {id = "j_quarries", tier = 15, level = 168, name = "Corner the Marble Quarries", energy = 148, cash = 6200000, xp = 3140, dropChance = 0.045, dropPool = "pool_t15"},
+    {id = "j_councilsecrets", tier = 15, level = 170, name = "Expose the Elder Council's Secrets", energy = 150, cash = 6700000, xp = 3220, dropChance = 0.045, dropPool = "pool_t15"},
+    {id = "j_firstseat", tier = 15, level = 172, name = "Take the First Seat", energy = 152, cash = 7300000, xp = 3300, dropChance = 0.05, dropPool = "pool_t15"},
+    {id = "j_tollmen", tier = 16, level = 174, name = "Bribe the Roadwarden's Tollmen", energy = 154, cash = 7900000, xp = 3450, dropChance = 0.035, dropPool = "pool_t16"},
+    {id = "j_caravanledger", tier = 16, level = 176, name = "Follow the Caravan Ledger", energy = 156, cash = 8500000, xp = 3530, dropChance = 0.04, dropPool = "pool_t16"},
+    {id = "j_sealcisterns", tier = 16, level = 178, name = "Seal the Cisterns", energy = 158, cash = 9200000, xp = 3610, dropChance = 0.04, dropPool = "pool_t16"},
+    {id = "j_caravanring", tier = 16, level = 180, name = "Break the Caravanserai Ring", energy = 160, cash = 9900000, xp = 3690, dropChance = 0.045, dropPool = "pool_t16"},
+    {id = "j_cisternkeys", tier = 16, level = 182, name = "Steal the Cistern Keys", energy = 162, cash = 10700000, xp = 3770, dropChance = 0.045, dropPool = "pool_t16"},
+    {id = "j_irongate", tier = 16, level = 184, name = "Force the Iron Gate", energy = 164, cash = 11500000, xp = 3850, dropChance = 0.05, dropPool = "pool_t16"},
+    {id = "j_scribes", tier = 17, level = 186, name = "Turn the Keeper's Scribes", energy = 166, cash = 12400000, xp = 4000, dropChance = 0.035, dropPool = "pool_t17"},
+    {id = "j_grudgeledger", tier = 17, level = 188, name = "Burn the Ledger of Grudges", energy = 168, cash = 13400000, xp = 4090, dropChance = 0.04, dropPool = "pool_t17"},
+    {id = "j_citadelstair", tier = 17, level = 190, name = "Hold the Citadel Stair", energy = 170, cash = 14500000, xp = 4180, dropChance = 0.04, dropPool = "pool_t17"},
+    {id = "j_unswcouncil", tier = 17, level = 192, name = "Unseat the Unsworn Council", energy = 172, cash = 15600000, xp = 4280, dropChance = 0.045, dropPool = "pool_t17"},
+    {id = "j_caradinering", tier = 17, level = 194, name = "Break Caradine's Ring", energy = 174, cash = 16800000, xp = 4380, dropChance = 0.045, dropPool = "pool_t17"},
+    {id = "j_rewriteoath", tier = 17, level = 196, name = "Rewrite the Oath", energy = 176, cash = 18000000, xp = 4500, dropChance = 0.05, dropPool = "pool_t17"}
 }
 
--- Mapping List untuk Dropdown
+-- Mapping List untuk Dropdown & Lookup Cepat
 local JobNamesList = {}
-local JobMap = {}
+local JobMap = {}       -- displayName -> id
+local JOBS_BY_ID = {}   -- id -> full job data (untuk ambil energy cost dll)
 
 for _, job in ipairs(JOBS) do
-    local displayName = "[Lv." .. job.level .. "] " .. job.name
+    local displayName = "[Lv." .. job.level .. "] " .. job.name .. " (E:" .. job.energy .. ")"
     table.insert(JobNamesList, displayName)
     JobMap[displayName] = job.id
+    JOBS_BY_ID[job.id] = job
 end
 
 -- =========================================================
@@ -160,13 +162,11 @@ local function ReadNodeValue(node)
         end
     end
 
-    -- Parsing format "current/max" contoh: "20/20" atau "19/20"
     local current, max = string.match(tostring(rawValue), "(%-?%d+)%s*/%s*(%-?%d+)")
     if current and max then
         return tonumber(current), tonumber(max), rawValue
     end
 
-    -- Fallback kalau cuma ada 1 angka
     local single = tonumber(rawValue) or tonumber(string.match(tostring(rawValue), "%-?%d+"))
     if single then
         return single, single, rawValue
@@ -215,6 +215,7 @@ end
 
 SetupLevelListener()
 
+-- Cari job dengan level tertinggi yang <= level saat ini (handle gap level otomatis)
 local function GetHighestUnlockedJob()
     local currentLvl = CurrentDetectedLevel
     local highestJobId = "j_watch"
@@ -361,14 +362,16 @@ MainTab:CreateButton({
     end
 })
 
+-- =========================================================
+-- AUTO JOB CONFIGURATIONS (LOGIC BARU: CEK LEVEL -> CEK ENERGY)
+-- =========================================================
 MainTab:CreateSection("Auto Job Configurations")
 
 local AutoJobEnabled = false
 local AutoHighestMode = true
 local SelectedJobId = "j_watch"
-local JobDelay = 0.5
 
-local AutoJobToggleRef = MainTab:CreateToggle({
+MainTab:CreateToggle({
     Title = "Enable Auto Job",
     Default = false,
     Flag = "AutoJobToggle",
@@ -406,18 +409,6 @@ MainTab:CreateDropdown({
     end
 })
 
-MainTab:CreateSlider({
-    Title = "Job Delay Speed",
-    Min = 0.1,
-    Max = 3,
-    Default = 0.5,
-    Suffix = " sec",
-    Flag = "JobDelaySlider",
-    Callback = function(Value)
-        JobDelay = Value
-    end
-})
-
 -- =========================================================
 -- DAILY PLAYTIME REWARD (LADDER CLAIM) SYSTEM
 -- =========================================================
@@ -425,44 +416,30 @@ local ClaimLadderRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Rem
 local LADDER_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 
 local AutoClaimEnabled = false
-local ClaimedStatus = {false, false, false, false, false} -- index 1 s/d 5
-local AutoClaimToggleRef = nil -- akan diisi setelah toggle dibuat
+local ClaimedStatus = {false, false, false, false, false}
+local AutoClaimToggleRef = nil
 
--- =========================================================
--- HELPER: Paksa Matikan Toggle UI Secara Visual (Multi Fallback)
--- Karena API pasti dari Lyora X tidak diketahui, kita coba
--- beberapa pattern umum yang biasa dipakai UI Library Roblox
--- =========================================================
 local function ForceSetToggleOff(toggleObject, flagName)
-    -- Pattern 1: toggleObject:Set(false)
     pcall(function()
         if toggleObject and toggleObject.Set then
             toggleObject:Set(false)
         end
     end)
-
-    -- Pattern 2: toggleObject:SetValue(false)
     pcall(function()
         if toggleObject and toggleObject.SetValue then
             toggleObject:SetValue(false)
         end
     end)
-
-    -- Pattern 3: toggleObject:Toggle(false)
     pcall(function()
         if toggleObject and toggleObject.Toggle then
             toggleObject:Toggle(false)
         end
     end)
-
-    -- Pattern 4: toggleObject.Value = false (property langsung)
     pcall(function()
         if toggleObject then
             toggleObject.Value = false
         end
     end)
-
-    -- Pattern 5: Update via Library Flags table (misal LunoLibrary.Flags[flagName])
     pcall(function()
         if LunoLibrary.Flags and LunoLibrary.Flags[flagName] ~= nil then
             if type(LunoLibrary.Flags[flagName]) == "table" then
@@ -472,15 +449,11 @@ local function ForceSetToggleOff(toggleObject, flagName)
             end
         end
     end)
-
-    -- Pattern 6: Library punya method global SetFlag
     pcall(function()
         if LunoLibrary.SetFlag then
             LunoLibrary:SetFlag(flagName, false)
         end
     end)
-
-    -- Pattern 7: Library punya method global UpdateToggle
     pcall(function()
         if LunoLibrary.UpdateToggle then
             LunoLibrary:UpdateToggle(flagName, false)
@@ -562,7 +535,6 @@ MainTab:CreateButton({
     end
 })
 
--- Loop khusus Auto Claim Daily Reward
 task.spawn(function()
     while true do
         task.wait(1.5)
@@ -580,12 +552,10 @@ task.spawn(function()
                         })
                     end
 
-                    task.wait(0.5) -- jeda antar claim biar gak spam remote
+                    task.wait(0.5)
                 end
             end
 
-            -- Kalau semua reward (1-5) sudah claimed / sudah pernah diklaim
-            -- matikan Auto Claim baik secara logic maupun visual toggle UI
             if IsAllRewardsClaimed() then
                 AutoClaimEnabled = false
                 ForceSetToggleOff(AutoClaimToggleRef, "AutoClaimLadderToggle")
@@ -601,22 +571,42 @@ task.spawn(function()
 end)
 
 -- =========================================================
--- MAIN AUTO JOB LOOP
+-- MAIN AUTO JOB LOOP (LOGIC BARU)
+-- Alur: Cek Level -> Tentukan Job -> Cek Energy -> Invoke (kalau cukup)
+-- Kalau Energy kurang, SKIP tanpa spam invoke, tunggu regen.
+-- Interval check di-fix 1 detik (tidak bisa diatur user).
 -- =========================================================
+local AUTO_JOB_CHECK_INTERVAL = 1 -- fixed, tidak bisa diubah user
+
 task.spawn(function()
     while true do
-        task.wait(JobDelay)
+        task.wait(AUTO_JOB_CHECK_INTERVAL)
+
         if AutoJobEnabled then
-            local targetJob = SelectedJobId
+            local targetJobId
 
             if AutoHighestMode then
-                local highestId = GetHighestUnlockedJob()
-                targetJob = highestId
+                targetJobId = GetHighestUnlockedJob()
+            else
+                targetJobId = SelectedJobId
             end
 
-            pcall(function()
-                DoJobRemote:InvokeServer(JOB_HASH, targetJob)
-            end)
+            local jobInfo = JOBS_BY_ID[targetJobId]
+
+            if jobInfo then
+                -- Cek apakah job sudah unlock berdasarkan level (safety check untuk manual select)
+                local levelOk = CurrentDetectedLevel >= jobInfo.level
+
+                -- Cek apakah energy cukup untuk 1x job
+                local energyOk = CurrentEnergy >= jobInfo.energy
+
+                if levelOk and energyOk then
+                    pcall(function()
+                        DoJobRemote:InvokeServer(JOB_HASH, targetJobId)
+                    end)
+                end
+                -- Kalau levelOk == false atau energyOk == false -> SKIP, tidak invoke apapun (no spam)
+            end
         end
     end
 end)
