@@ -5,7 +5,7 @@ local LibraryUrl = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/r
 local LunoLibrary = loadstring(game:HttpGet(LibraryUrl))()
 
 -- 1b. Load Jobs Data Module (via link, sama seperti load Library)
-local JobsDataUrl = "https://raw.githubusercontent.com/USERNAME/REPO/main/JobsData.lua"
+local JobsDataUrl = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/JobsData.lua"
 local JobsData = loadstring(game:HttpGet(JobsDataUrl))()
 local JOBS = JobsData.JOBS
 
