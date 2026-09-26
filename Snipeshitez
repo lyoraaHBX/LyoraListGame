@@ -130,8 +130,7 @@ end
 
 -- =========================================================
 -- GENERIC UI VALUE READER (LEVEL / ENERGY / HEALTH / STAMINA)
--- Semua menggunakan teknik yang sama: cek Attribute "ContentText"
--- lalu fallback ke .Value / .Text native
+-- Support parsing format "current/max" (ex: "19/20")
 -- =========================================================
 local function SafeFindPath(pathParts)
     local current = LocalPlayer
@@ -143,7 +142,7 @@ local function SafeFindPath(pathParts)
 end
 
 local function ReadNodeValue(node)
-    if not node then return 0, "N/A" end
+    if not node then return 0, 0, "N/A" end
 
     local rawValue = "N/A"
 
@@ -165,8 +164,19 @@ local function ReadNodeValue(node)
         end
     end
 
-    local num = tonumber(rawValue) or tonumber(string.match(tostring(rawValue), "%-?%d+"))
-    return num or 0, rawValue
+    -- Parsing format "current/max" contoh: "20/20" atau "19/20"
+    local current, max = string.match(tostring(rawValue), "(%-?%d+)%s*/%s*(%-?%d+)")
+    if current and max then
+        return tonumber(current), tonumber(max), rawValue
+    end
+
+    -- Fallback kalau cuma ada 1 angka (misal buat Level yang gak ada format "/")
+    local single = tonumber(rawValue) or tonumber(string.match(tostring(rawValue), "%-?%d+"))
+    if single then
+        return single, single, rawValue
+    end
+
+    return 0, 0, rawValue
 end
 
 -- =========================================================
@@ -185,7 +195,7 @@ local function SetupLevelListener()
     end
 
     local function UpdateLevel()
-        local val, raw = ReadNodeValue(levelBadge)
+        local val, _, raw = ReadNodeValue(levelBadge)
         CurrentDetectedLevel = val
         CurrentRawLevelText = raw
     end
@@ -198,6 +208,14 @@ local function SetupLevelListener()
     if childText then
         childText:GetPropertyChangedSignal("Text"):Connect(UpdateLevel)
     end
+
+    -- Polling tambahan biar tetap ke-detect realtime
+    task.spawn(function()
+        while levelBadge and levelBadge.Parent do
+            UpdateLevel()
+            task.wait(1)
+        end
+    end)
 end
 
 SetupLevelListener()
@@ -221,9 +239,9 @@ end
 -- =========================================================
 -- POOLS MONITOR (ENERGY / STAMINA / HEALTH) - VIA UI PATH DIRECT
 -- =========================================================
-local CurrentEnergy = 0
-local CurrentStamina = 0
-local CurrentHealth = 0
+local CurrentEnergy, MaxEnergy = 0, 0
+local CurrentStamina, MaxStamina = 0, 0
+local CurrentHealth, MaxHealth = 0, 0
 
 local CurrentRawEnergyText = "N/A"
 local CurrentRawStaminaText = "N/A"
@@ -243,8 +261,8 @@ local function SetupBarListener(pathParts, updateCallback)
     end
 
     local function DoUpdate()
-        local val, raw = ReadNodeValue(node)
-        updateCallback(val, raw)
+        local val, maxVal, raw = ReadNodeValue(node)
+        updateCallback(val, maxVal, raw)
     end
 
     DoUpdate()
@@ -262,20 +280,31 @@ local function SetupBarListener(pathParts, updateCallback)
     if childText then
         childText:GetPropertyChangedSignal("Text"):Connect(DoUpdate)
     end
+
+    -- Polling tambahan biar TETAP ke-detect realtime walau signal ga fire
+    task.spawn(function()
+        while node and node.Parent do
+            DoUpdate()
+            task.wait(0.5)
+        end
+    end)
 end
 
-SetupBarListener(EnergyPath, function(val, raw)
+SetupBarListener(EnergyPath, function(val, maxVal, raw)
     CurrentEnergy = val
+    MaxEnergy = maxVal
     CurrentRawEnergyText = raw
 end)
 
-SetupBarListener(StaminaPath, function(val, raw)
+SetupBarListener(StaminaPath, function(val, maxVal, raw)
     CurrentStamina = val
+    MaxStamina = maxVal
     CurrentRawStaminaText = raw
 end)
 
-SetupBarListener(HealthPath, function(val, raw)
+SetupBarListener(HealthPath, function(val, maxVal, raw)
     CurrentHealth = val
+    MaxHealth = maxVal
     CurrentRawHealthText = raw
 end)
 
@@ -313,7 +342,7 @@ MainTab:CreateButton({
     Callback = function()
         LunoLibrary:Notify({
             Title = "Energy Status",
-            Content = "Raw Text: '" .. tostring(CurrentRawEnergyText) .. "'\nCurrent Energy: " .. tostring(CurrentEnergy),
+            Content = "Energy: " .. tostring(CurrentEnergy) .. "/" .. tostring(MaxEnergy) .. "\nRaw Text: '" .. tostring(CurrentRawEnergyText) .. "'",
             Duration = 4
         })
     end
@@ -324,7 +353,7 @@ MainTab:CreateButton({
     Callback = function()
         LunoLibrary:Notify({
             Title = "Stamina Status",
-            Content = "Raw Text: '" .. tostring(CurrentRawStaminaText) .. "'\nCurrent Stamina: " .. tostring(CurrentStamina),
+            Content = "Stamina: " .. tostring(CurrentStamina) .. "/" .. tostring(MaxStamina) .. "\nRaw Text: '" .. tostring(CurrentRawStaminaText) .. "'",
             Duration = 4
         })
     end
@@ -335,7 +364,7 @@ MainTab:CreateButton({
     Callback = function()
         LunoLibrary:Notify({
             Title = "Health Status",
-            Content = "Raw Text: '" .. tostring(CurrentRawHealthText) .. "'\nCurrent Health: " .. tostring(CurrentHealth),
+            Content = "Health: " .. tostring(CurrentHealth) .. "/" .. tostring(MaxHealth) .. "\nRaw Text: '" .. tostring(CurrentRawHealthText) .. "'",
             Duration = 4
         })
     end
