@@ -1,0 +1,327 @@
+-- [[ AUTO JOB SCRIPT - LUNO / LYORA X UI ]] --
+
+-- 1. Load Library Lyora X
+local LibraryUrl = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
+local LunoLibrary = loadstring(game:HttpGet(LibraryUrl))()
+
+-- 2. Service & Remotes
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+local MWRemotes = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes")
+local DoJobRemote = MWRemotes:WaitForChild("DoJob")
+local NotifyRemote = MWRemotes:WaitForChild("Notify")
+
+local JOB_HASH = "ca01587a32b24eb1a0527e8e595e8483"
+
+-- 3. Cache Level Variables
+local RealTimeLevel = 1
+
+-- 4. Data Jobs Complete
+local JOBS = {
+    {id = "j_watch", level = 1, name = "Keep Watch on the Corner"},
+    {id = "j_tag", level = 2, name = "Tag Rival Turf"},
+    {id = "j_boost", level = 3, name = "Boost a Parked Car"},
+    {id = "j_shake", level = 4, name = "Shake Down the Newsstand"},
+    {id = "j_fence", level = 5, name = "Fence Fake Watches"},
+    {id = "j_rough", level = 6, name = "Rough Up a Pickpocket"},
+    {id = "j_hijack", level = 8, name = "Hijack a Delivery Truck"},
+    {id = "j_chop", level = 9, name = "Run the Chop Shop Night Shift"},
+    {id = "j_bribe", level = 10, name = "Bribe a Dock Inspector"},
+    {id = "j_pawn", level = 12, name = "Rob the Pawn Shop Safe"},
+    {id = "j_forge", level = 14, name = "Forge Gallery Paintings"},
+    {id = "j_torch", level = 16, name = "Torch a Rival's Warehouse"},
+    {id = "j_vault", level = 18, name = "Crack the Vault at First National"},
+    {id = "j_convoy", level = 20, name = "Ambush the Kovac Convoy"},
+    {id = "j_union", level = 22, name = "Rig the Union Election"},
+    {id = "j_gala", level = 24, name = "Heist the Museum Gala"},
+    {id = "j_witness", level = 26, name = "Silence a Witness"},
+    {id = "j_waterfront", level = 28, name = "Take Over the Waterfront"},
+    {id = "j_contraband", level = 30, name = "Smuggle Contraband Past the Coast Guard"},
+    {id = "j_cane", level = 32, name = "Shake Down the Cane Fields"},
+    {id = "j_races", level = 34, name = "Rig the Marina Boat Races"},
+    {id = "j_speedboat", level = 36, name = "Hijack a Smuggler's Speedboat"},
+    {id = "j_harbormaster", level = 38, name = "Bribe the Harbor Master"},
+    {id = "j_ferry", level = 40, name = "Rob the Gold Bullion Ferry"},
+    {id = "j_guns", level = 42, name = "Run a Convoy to the Rebels"},
+    {id = "j_aide", level = 44, name = "Blackmail the Governor's Aide"},
+    {id = "j_sugar", level = 46, name = "Heist the Sugar Baron's Vault"},
+    {id = "j_fleet", level = 48, name = "Sink a Rival Smuggler's Fleet"},
+    {id = "j_grandcasino", level = 50, name = "Seize the Grand Pavilion"},
+    {id = "j_islandtrade", level = 52, name = "Take Over the Island Trade"},
+    {id = "j_depot", level = 54, name = "Raid an Abandoned Supply Depot"},
+    {id = "j_boxing", level = 56, name = "Fix the Underground Boxing Circuit"},
+    {id = "j_icehouse", level = 58, name = "Shake Down the Icehouse District"},
+    {id = "j_railyard", level = 60, name = "Bribe the Rail Yard Commissar"},
+    {id = "j_icetrucks", level = 62, name = "Steal Kovac's Ice Trucks"},
+    {id = "j_socialclub", level = 64, name = "Torch the Kolyev Social Club"},
+    {id = "j_statebank", level = 66, name = "Rob the State Bank of Volkovsk"},
+    {id = "j_courier", level = 68, name = "Ambush the Diamond Courier Train"},
+    {id = "j_prosecutor", level = 70, name = "Silence the Prosecutor General"},
+    {id = "j_auction", level = 72, name = "Heist the Winter Palace Auction"},
+    {id = "j_blockade", level = 74, name = "Break the Kovac Blockade"},
+    {id = "j_underworld", level = 76, name = "Take Over the Volkovsk Underworld"},
+    {id = "j_jade", level = 78, name = "Smuggle Jade Through Customs"},
+    {id = "j_dragonden", level = 80, name = "Fix the Dragon Den Prizefights"},
+    {id = "j_nightmarket", level = 82, name = "Shake Down the Night Market"},
+    {id = "j_freighter", level = 84, name = "Hijack a Freighter of Counterfeits"},
+    {id = "j_captains", level = 86, name = "Bribe the Jade Court Captains"},
+    {id = "j_goldenlotus", level = 88, name = "Rob the Golden Lotus Vault"},
+    {id = "j_jadeseal", level = 90, name = "Steal the Emperor's Jade Seal"},
+    {id = "j_summit", level = 92, name = "Ambush the Jade Court Summit"},
+    {id = "j_floatingpalace", level = 94, name = "Heist the Floating Palace"},
+    {id = "j_heir", level = 96, name = "Silence the Dragon Head's Heir"},
+    {id = "j_rivalfleet", level = 98, name = "Burn the Rival Fleet at Anchor"},
+    {id = "j_jadeharbor", level = 100, name = "Take Over Jade Harbor"},
+    {id = "j_precinct", level = 102, name = "Pay Off the Precinct Captains"},
+    {id = "j_records", level = 104, name = "Burgle the Records Hall"},
+    {id = "j_councilman", level = 106, name = "Blackmail a City Councilman"},
+    {id = "j_docket", level = 108, name = "Steal the Court Docket"},
+    {id = "j_herald", level = 110, name = "Plant a Story in the Morning Herald"},
+    {id = "j_election", level = 112, name = "Rig the Council Election"},
+    {id = "j_starwitness", level = 114, name = "Buy Off the Star Witness"},
+    {id = "j_archive", level = 116, name = "Break Into the Chancellery Archive"},
+    {id = "j_bench", level = 118, name = "Bribe the Supreme Bench"},
+    {id = "j_bullion", level = 120, name = "Swap the Mint's Bullion"},
+    {id = "j_ledgers", level = 122, name = "Seize the Sterling Ledgers"},
+    {id = "j_charter", level = 124, name = "Claim the Charter Seat"},
+    {id = "j_tollpass", level = 126, name = "Bribe the Mountain Toll Wardens"},
+    {id = "j_goldrun", level = 128, name = "Smuggle Gold Over the High Pass"},
+    {id = "j_numbered", level = 130, name = "Forge a Numbered Account"},
+    {id = "j_goldtrain", level = 132, name = "Rob the Alpine Gold Train"},
+    {id = "j_cables", level = 134, name = "Intercept the Courier Cables"},
+    {id = "j_chamberseat", level = 136, name = "Buy a Seat at the Chamber Table"},
+    {id = "j_vaults", level = 138, name = "Crack the Numbered Vaults"},
+    {id = "j_sealforge", level = 140, name = "Counterfeit the Chamber Seals"},
+    {id = "j_vaultkeys", level = 142, name = "Ransom the Vault Governor's Keys"},
+    {id = "j_express", level = 144, name = "Derail the Chairman's Express"},
+    {id = "j_freeze", level = 146, name = "Freeze the Chamber's Accounts"},
+    {id = "j_chairman", level = 148, name = "Take the Chairman's Seat"},
+    {id = "j_oldharbor", level = 150, name = "Bribe the Old Harbor Master"},
+    {id = "j_ferryledger", level = 152, name = "Steal the Ferryman's Ledger"},
+    {id = "j_olivepress", level = 154, name = "Shake Down the Olive Press Barons"},
+    {id = "j_cliffcourier", level = 156, name = "Rob the Cliffside Courier"},
+    {id = "j_processions", level = 158, name = "Extort the Procession Road Tolls"},
+    {id = "j_eldersaudience", level = 160, name = "Buy an Audience with the Elders"},
+    {id = "j_turncapos", level = 162, name = "Turn the First Family's Capos"},
+    {id = "j_familytreasury", level = 164, name = "Raid the First Family's Treasury"},
+    {id = "j_bookofoaths", level = 166, name = "Steal the Book of Oaths"},
+    {id = "j_quarries", level = 168, name = "Corner the Marble Quarries"},
+    {id = "j_councilsecrets", level = 170, name = "Expose the Elder Council's Secrets"},
+    {id = "j_firstseat", level = 172, name = "Take the First Seat"},
+    {id = "j_tollmen", level = 174, name = "Bribe the Roadwarden's Tollmen"},
+    {id = "j_caravanledger", level = 176, name = "Follow the Caravan Ledger"},
+    {id = "j_sealcisterns", level = 178, name = "Seal the Cisterns"},
+    {id = "j_caravanring", level = 180, name = "Break the Caravanserai Ring"},
+    {id = "j_cisternkeys", level = 182, name = "Steal the Cistern Keys"},
+    {id = "j_irongate", level = 184, name = "Force the Iron Gate"},
+    {id = "j_scribes", level = 186, name = "Turn the Keeper's Scribes"},
+    {id = "j_grudgeledger", level = 188, name = "Burn the Ledger of Grudges"},
+    {id = "j_citadelstair", level = 190, name = "Hold the Citadel Stair"},
+    {id = "j_unswcouncil", level = 192, name = "Unseat the Unsworn Council"},
+    {id = "j_caradinering", level = 194, name = "Break Caradine's Ring"},
+    {id = "j_rewriteoath", level = 196, name = "Rewrite the Oath"}
+}
+
+-- Mapping List untuk Dropdown
+local JobNamesList = {}
+local JobMap = {}
+
+for _, job in ipairs(JOBS) do
+    local displayName = "[Lv." .. job.level .. "] " .. job.name
+    table.insert(JobNamesList, displayName)
+    JobMap[displayName] = job.id
+end
+
+-- =========================================================
+-- SISTEM DETEKSI LEVEL ULTRA-AKURAT (MULTI-LAYER)
+-- =========================================================
+
+-- Function Ekstrak Angka dari Teks
+local function ExtractNumber(str)
+    if type(str) == "number" then return str end
+    if type(str) == "string" then
+        local num = string.match(str, "%d+")
+        if num then return tonumber(num) end
+    end
+    return nil
+end
+
+-- Layer 1: Deteksi dari PlayerGui
+local function FetchLevelFromGui()
+    local lvl = nil
+    pcall(function()
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        local levelBadge = playerGui and playerGui.MafiaWarsUI.Root.TopBar.AvatarCard.AvatarCluster.AvatarFrame.LevelBadge
+        if levelBadge and levelBadge.Text then
+            lvl = ExtractNumber(levelBadge.Text)
+        end
+    end)
+    return lvl
+end
+
+-- Update Function untuk Sinkronisasi Level
+local function UpdateAccurateLevel()
+    local guiLvl = FetchLevelFromGui()
+    if guiLvl then
+        RealTimeLevel = guiLvl
+    end
+    return RealTimeLevel
+end
+
+-- Layer 2: Listening Remote Event "Notify" (Server Event)
+NotifyRemote.OnClientEvent:Connect(function(category, message, data)
+    if category == "level" and type(data) == "table" and data.level then
+        local newLvl = tonumber(data.level)
+        if newLvl then
+            RealTimeLevel = newLvl
+            LunoLibrary:Notify({
+                Title = "LEVEL UP!",
+                Content = "You reached Level " .. tostring(newLvl) .. "!",
+                Duration = 4
+            })
+        end
+    end
+end)
+
+-- Layer 3: Dynamic Property Listener ke PlayerGui
+task.spawn(function()
+    pcall(function()
+        local playerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
+        local mafiaUI = playerGui and playerGui:WaitForChild("MafiaWarsUI", 5)
+        local levelBadge = mafiaUI and mafiaUI.Root.TopBar.AvatarCard.AvatarCluster.AvatarFrame:WaitForChild("LevelBadge", 5)
+        
+        if levelBadge then
+            UpdateAccurateLevel()
+            levelBadge:GetPropertyChangedSignal("Text"):Connect(function()
+                UpdateAccurateLevel()
+            end)
+        end
+    end)
+end)
+
+-- Fetch Awal saat Script Dijalankan
+UpdateAccurateLevel()
+
+-- Function Mendapatkan Job Tertinggi Berdasarkan Level Akurat
+local function GetHighestUnlockedJob()
+    local currentLvl = UpdateAccurateLevel()
+    local highestJobId = "j_watch"
+    local highestJobName = "Keep Watch on the Corner"
+    
+    for _, job in ipairs(JOBS) do
+        if currentLvl >= job.level then
+            highestJobId = job.id
+            highestJobName = job.name
+        else
+            break
+        end
+    end
+    return highestJobId, currentLvl, highestJobName
+end
+
+-- =========================================================
+-- USER INTERFACE (LUNO / LYORA X)
+-- =========================================================
+
+local Window = LunoLibrary:CreateWindow({
+    Title = "LUNO MAFIA",
+    SubTitle = "Auto Job System",
+    Discord = "https://discord.gg/lunar"
+})
+
+local MainTab = Window:CreateTab("Auto Farm")
+
+MainTab:CreateSection("Level Status")
+
+-- TOMBOL KHUSUS NOTIFIKASI LEVEL REAL-TIME
+MainTab:CreateButton({
+    Title = "Check Real-Time Level",
+    Callback = function()
+        local jobId, accurateLevel, jobName = GetHighestUnlockedJob()
+        LunoLibrary:Notify({
+            Title = "Accurate Level Info",
+            Content = "Level: " .. tostring(accurateLevel) .. " | Current Job: " .. jobName,
+            Duration = 5
+        })
+    end
+})
+
+MainTab:CreateSection("Auto Job Configurations")
+
+local AutoJobEnabled = false
+local AutoHighestMode = true
+local SelectedJobId = "j_watch"
+local JobDelay = 0.5
+
+MainTab:CreateToggle({
+    Title = "Enable Auto Job",
+    Default = false,
+    Flag = "AutoJobToggle",
+    Callback = function(Value)
+        AutoJobEnabled = Value
+        if Value then
+            local _, lvl, name = GetHighestUnlockedJob()
+            LunoLibrary:Notify({
+                Title = "Auto Job Activated",
+                Content = "Working on [Lv." .. lvl .. "] " .. name,
+                Duration = 3
+            })
+        end
+    end
+})
+
+MainTab:CreateToggle({
+    Title = "Auto Select Highest Unlocked Job",
+    Default = true,
+    Flag = "AutoHighestJobToggle",
+    Callback = function(Value)
+        AutoHighestMode = Value
+    end
+})
+
+MainTab:CreateDropdown({
+    Title = "Manual Select Job",
+    Options = JobNamesList,
+    Multi = false,
+    Flag = "SelectedManualJob",
+    Callback = function(Selected)
+        if JobMap[Selected] then
+            SelectedJobId = JobMap[Selected]
+        end
+    end
+})
+
+MainTab:CreateSlider({
+    Title = "Job Delay Speed",
+    Min = 0.1,
+    Max = 3,
+    Default = 0.5,
+    Suffix = " sec",
+    Flag = "JobDelaySlider",
+    Callback = function(Value)
+        JobDelay = Value
+    end
+})
+
+-- =========================================================
+-- AUTO JOB LOOP
+-- =========================================================
+task.spawn(function()
+    while true do
+        task.wait(JobDelay)
+        if AutoJobEnabled then
+            local targetJob = SelectedJobId
+            
+            if AutoHighestMode then
+                local highestId = GetHighestUnlockedJob()
+                targetJob = highestId
+            end
+
+            pcall(function()
+                DoJobRemote:InvokeServer(JOB_HASH, targetJob)
+            end)
+        end
+    end
+end)
