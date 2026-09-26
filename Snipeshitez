@@ -9,7 +9,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-local DoJobRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("DoJob")
+local MWRemotes = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes")
+local DoJobRemote = MWRemotes:WaitForChild("DoJob")
+local PoolsTickEvent = MWRemotes:WaitForChild("PoolsTick")
 local JOB_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 
 -- 3. Data Jobs Complete
@@ -133,7 +135,6 @@ end
 -- =========================================================
 local CurrentDetectedLevel = 1
 local CurrentRawText = "N/A"
-local LevelBadgeRef = nil
 
 local function TryFindLevelBadge()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
@@ -152,12 +153,12 @@ local function ReadLevelFromBadge(levelBadge)
 
     local rawTextValue = "N/A"
 
-    -- Prioritas 1: Attribute "ContentText" (realtime, sesuai temuan di Properties)
+    -- Prioritas 1: Attribute "ContentText" (realtime, sesuai Properties panel)
     local attrValue = levelBadge:GetAttribute("ContentText")
     if attrValue ~= nil then
         rawTextValue = tostring(attrValue)
     else
-        -- Prioritas 2: Cari child TextLabel di dalam LevelBadge (kalau LevelBadge cuma container)
+        -- Prioritas 2: Cari child TextLabel di dalam LevelBadge
         local childText = levelBadge:FindFirstChildOfClass("TextLabel")
         if childText then
             rawTextValue = childText.Text
@@ -174,12 +175,9 @@ end
 local function SetupLevelListener()
     local levelBadge = TryFindLevelBadge()
     if not levelBadge then
-        -- Kalau UI belum load, coba lagi nanti
         task.delay(2, SetupLevelListener)
         return
     end
-
-    LevelBadgeRef = levelBadge
 
     local function UpdateLevel()
         local lvl, raw = ReadLevelFromBadge(levelBadge)
@@ -220,6 +218,63 @@ local function GetHighestUnlockedJob()
 end
 
 -- =========================================================
+-- POOLS MONITOR (ENERGY / STAMINA / HEAL) - REALTIME
+-- =========================================================
+local CurrentEnergy = 0
+local CurrentStamina = 0
+local CurrentHeal = 0
+local LastRawArgs = {}
+
+local function UpdatePoolsFromArgs(...)
+    local args = {...}
+    LastRawArgs = args
+
+    -- Case 1: Server kirim table tunggal { Energy = .., Stamina = .., Heal = .. }
+    if type(args[1]) == "table" then
+        local data = args[1]
+        for key, value in pairs(data) do
+            local lowerKey = string.lower(tostring(key))
+            if lowerKey:find("energy") then
+                CurrentEnergy = value
+            elseif lowerKey:find("stamina") then
+                CurrentStamina = value
+            elseif lowerKey:find("heal") or lowerKey:find("health") then
+                CurrentHeal = value
+            end
+        end
+        return
+    end
+
+    -- Case 2: Server kirim positional angka berurutan (energy, stamina, heal)
+    if type(args[1]) == "number" then
+        if args[1] ~= nil then CurrentEnergy = args[1] end
+        if args[2] ~= nil then CurrentStamina = args[2] end
+        if args[3] ~= nil then CurrentHeal = args[3] end
+        return
+    end
+
+    -- Case 3: Server kirim pasangan value, key, value, key, ...
+    local i = 1
+    while i <= #args do
+        local val = args[i]
+        local key = args[i + 1]
+        if type(val) == "number" and type(key) == "string" then
+            local lowerKey = string.lower(key)
+            if lowerKey:find("energy") then
+                CurrentEnergy = val
+            elseif lowerKey:find("stamina") then
+                CurrentStamina = val
+            elseif lowerKey:find("heal") or lowerKey:find("health") then
+                CurrentHeal = val
+            end
+        end
+        i = i + 2
+    end
+end
+
+PoolsTickEvent.OnClientEvent:Connect(UpdatePoolsFromArgs)
+
+-- =========================================================
 -- UI WINDOW SETUP (LUNO / LYORA X)
 -- =========================================================
 
@@ -243,6 +298,58 @@ MainTab:CreateButton({
             Title = "Level Badge Text Read",
             Content = "Raw Text: '" .. tostring(rawText) .. "'\nDetected Level: " .. tostring(accurateLevel) .. "\nJob: " .. jobName,
             Duration = 5
+        })
+    end
+})
+
+MainTab:CreateSection("Pools Monitor (Energy / Stamina / Heal)")
+
+MainTab:CreateButton({
+    Title = "Check Real-Time Energy",
+    Callback = function()
+        LunoLibrary:Notify({
+            Title = "Energy Status",
+            Content = "Current Energy: " .. tostring(CurrentEnergy),
+            Duration = 4
+        })
+    end
+})
+
+MainTab:CreateButton({
+    Title = "Check Real-Time Stamina",
+    Callback = function()
+        LunoLibrary:Notify({
+            Title = "Stamina Status",
+            Content = "Current Stamina: " .. tostring(CurrentStamina),
+            Duration = 4
+        })
+    end
+})
+
+MainTab:CreateButton({
+    Title = "Check Real-Time Heal",
+    Callback = function()
+        LunoLibrary:Notify({
+            Title = "Heal Status",
+            Content = "Current Heal: " .. tostring(CurrentHeal),
+            Duration = 4
+        })
+    end
+})
+
+MainTab:CreateButton({
+    Title = "Debug: Dump Raw PoolsTick Data",
+    Callback = function()
+        local dump = ""
+        for idx, v in ipairs(LastRawArgs) do
+            dump = dump .. "[" .. idx .. "] " .. tostring(v) .. " (" .. type(v) .. ")\n"
+        end
+        if dump == "" then dump = "Belum ada data masuk dari PoolsTick." end
+
+        LunoLibrary:Notify({
+            Title = "Raw PoolsTick Args",
+            Content = dump,
+            Duration = 8
         })
     end
 })
