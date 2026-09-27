@@ -625,6 +625,130 @@ end
 
 for slotIndex = 1, 4 do
     OperationsTab:CreateSection("Operation Slot " .. slotIndex)
+    -- =========================================================
+-- DEBUG TOOLS (BUAT CEK PATH & VALUE MENTAH)
+-- =========================================================
+OperationsTab:CreateSection("Debug Tools")
+
+OperationsTab:CreateButton({
+    Title = "🔍 Debug Check Operations Status",
+    Callback = function()
+        print("=========================================")
+        print("[DEBUG] OPERATIONS STATUS CHECK")
+        print("=========================================")
+
+        local summaryLines = {}
+
+        for i = 1, 4 do
+            local node = GetSlotProgressNode(i)
+
+            if not node then
+                local line = "Slot " .. i .. ": ❌ NODE NOT FOUND (path salah/slot gak ada di UI)"
+                print("[DEBUG] " .. line)
+                table.insert(summaryLines, line)
+            else
+                local rawText = GetRawTextFromNode(node)
+                local parsedSeconds = ParseOperationTimeLeft(rawText)
+
+                local statusText
+                if parsedSeconds == nil then
+                    statusText = "UNKNOWN/EMPTY (aman utk collect)"
+                elseif parsedSeconds > 0 then
+                    statusText = "RUNNING (" .. parsedSeconds .. "s left)"
+                else
+                    statusText = "READY TO COLLECT"
+                end
+
+                local line = "Slot " .. i .. ": Raw=\"" .. tostring(rawText) .. "\" | Parsed=" .. tostring(parsedSeconds) .. "s | Status=" .. statusText
+
+                print("[DEBUG] " .. line)
+                print("[DEBUG]   -> Node Path: " .. node:GetFullName())
+                print("[DEBUG]   -> Node ClassName: " .. node.ClassName)
+
+                -- Cek juga apakah slot ini AutoEnabled di script
+                local slotState = OperationSlotState[i]
+                print("[DEBUG]   -> AutoEnabled: " .. tostring(slotState.AutoEnabled) .. " | Selected OpId: " .. tostring(slotState.OpId))
+
+                table.insert(summaryLines, "Slot " .. i .. ": " .. statusText)
+            end
+        end
+
+        print("=========================================")
+        print("[DEBUG] LEVEL & BARS STATUS")
+        print("=========================================")
+        print("[DEBUG] Level: " .. tostring(CurrentDetectedLevel))
+        print("[DEBUG] Energy: " .. tostring(CurrentEnergy) .. "/" .. tostring(MaxEnergy))
+        print("[DEBUG] Stamina: " .. tostring(CurrentStamina) .. "/" .. tostring(MaxStamina))
+        print("[DEBUG] Health: " .. tostring(CurrentHealth) .. "/" .. tostring(MaxHealth))
+        print("=========================================")
+
+        -- Cek juga apakah root path OpsPanel ketemu atau nggak (buat troubleshoot cepat)
+        local opsPanelRoot = SafeFindPath({"PlayerGui", "MafiaWarsUI", "Root", "Content", "OpsPanel"})
+        if not opsPanelRoot then
+            print("[DEBUG] ⚠️ WARNING: OpsPanel root TIDAK DITEMUKAN. Kemungkinan UI belum kebuka atau path berubah.")
+            table.insert(summaryLines, "⚠️ OpsPanel root tidak ditemukan!")
+        else
+            print("[DEBUG] ✅ OpsPanel root ditemukan: " .. opsPanelRoot:GetFullName())
+        end
+
+        -- Tampilkan ringkasan via Notify
+        QueueNotify({
+            Title = "Debug Check Selesai",
+            Content = table.concat(summaryLines, "\n") .. "\n\nCek Developer Console (F9) untuk detail lengkap.",
+            Duration = 6
+        })
+    end
+})
+
+OperationsTab:CreateButton({
+    Title = "🔍 Debug Dump Full OpsPanel Structure",
+    Callback = function()
+        local opsPanelRoot = SafeFindPath({"PlayerGui", "MafiaWarsUI", "Root", "Content", "OpsPanel"})
+
+        if not opsPanelRoot then
+            print("[DEBUG] OpsPanel root tidak ditemukan, gak bisa dump structure.")
+            QueueNotify({
+                Title = "Debug Dump Gagal",
+                Content = "OpsPanel root tidak ditemukan. Pastikan UI Operations sedang terbuka.",
+                Duration = 4
+            })
+            return
+        end
+
+        print("=========================================")
+        print("[DEBUG] FULL OPSPANEL STRUCTURE DUMP")
+        print("=========================================")
+
+        local function DumpChildren(instance, depth)
+            local prefix = string.rep("  ", depth)
+            for _, child in ipairs(instance:GetChildren()) do
+                local extra = ""
+                local attr = child:GetAttribute("ContentText")
+                if attr ~= nil then
+                    extra = " [ContentText=\"" .. tostring(attr) .. "\"]"
+                elseif child:IsA("TextLabel") or child:IsA("TextButton") then
+                    extra = " [Text=\"" .. child.Text .. "\"]"
+                end
+
+                print(prefix .. "- " .. child.Name .. " (" .. child.ClassName .. ")" .. extra)
+
+                if depth < 5 then
+                    DumpChildren(child, depth + 1)
+                end
+            end
+        end
+
+        DumpChildren(opsPanelRoot, 0)
+
+        print("=========================================")
+
+        QueueNotify({
+            Title = "Debug Dump Selesai",
+            Content = "Struktur lengkap OpsPanel sudah di-print ke Developer Console (F9).",
+            Duration = 4
+        })
+    end
+})
 
     OperationsTab:CreateDropdown({
         Title = "Select Operation for Slot " .. slotIndex,
