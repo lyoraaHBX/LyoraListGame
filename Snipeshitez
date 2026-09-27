@@ -3,6 +3,7 @@
 local BASE_URL = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/"
 local LIB_URL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
 
+-- Cache-buster: paksa GitHub CDN kasih versi terbaru, bukan versi cache lama
 local function NoCacheUrl(url)
     return url .. "?t=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
 end
@@ -28,13 +29,15 @@ local LunoLibrary = LoadRemote(LIB_URL)
 local JobsData = LoadRemote(BASE_URL .. "JobsData.lua")
 local OperationsData = LoadRemote(BASE_URL .. "OperationsData.lua")
 local PropertiesData = LoadRemote(BASE_URL .. "PropertiesData.lua")
-local ShopData = LoadRemote(BASE_URL .. "ShopData.lua")
+local ShopData = LoadRemote(BASE_URL .. "ShopData.lua") -- [NEW] data khusus Shop (modular)
 
 -- 3. Load Shared Core
 local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
 local Context = SharedCore.Init(LunoLibrary)
 
 -- 4. Load & Init tiap fitur sebagai module terpisah
+-- URUTAN INI MENENTUKAN URUTAN SECTION DI TAB "Auto Farm":
+-- Auto Job -> Auto Property -> Auto Point Allocation -> Daily Reward -> Daily/Weekly Task
 local FeatureModules = {
     { url = BASE_URL .. "JobModule.lua",         args = { JobsData.JOBS } },
     { url = BASE_URL .. "PropertyModule.lua",    args = { PropertiesData.PROPERTIES } },
@@ -47,7 +50,7 @@ local FeatureModules = {
 for i, feature in ipairs(FeatureModules) do
     local ok, mod = pcall(LoadRemote, feature.url)
     if ok and mod and mod.Init then
-        print("[Loader] Loading order #" .. i .. ": " .. feature.url)
+        print("[Loader] Loading order #" .. i .. ": " .. feature.url) -- debug, boleh dihapus nanti
         local initOk, initErr = pcall(mod.Init, Context, table.unpack(feature.args))
         if not initOk then
             warn("[FeatureInit Error] " .. feature.url .. ": " .. tostring(initErr))
@@ -67,6 +70,7 @@ do
     local LocalPlayer = Players.LocalPlayer
 
     local SHOP = (ShopData and ShopData.SHOP) or {}
+    local TIER_NAMES = (ShopData and ShopData.TIER_NAMES) or {}
 
     -- Sama persis dengan JOB_HASH di JobModule.lua
     local ACTION_HASH = "ca01587a32b24eb1a0527e8e595e8483"
@@ -75,13 +79,16 @@ do
     print("[BankShop][Debug] Jumlah item SHOP terload: " .. #SHOP)
     print("[BankShop][Debug] Menggunakan ACTION_HASH: " .. ACTION_HASH)
 
+    -----------------------------------------------------------------
+    -- Pastikan LunoLibrary:CreateTab tersedia (artinya CreateWindow sudah dipanggil)
+    -----------------------------------------------------------------
     if type(LunoLibrary.CreateTab) ~= "function" then
-        warn("[BankShop][Debug] LunoLibrary:CreateTab tidak ditemukan!")
+        warn("[BankShop][Debug] LunoLibrary:CreateTab tidak ditemukan! Pastikan SharedCore.Init() sudah memanggil LunoLibrary:CreateWindow() sebelum baris ini.")
         return
     end
 
     local ok_tab, Tab = pcall(function()
-        return LunoLibrary:CreateTab("Bank & Shop")
+        return LunoLibrary:CreateTab("Bank & Shop") -- tanpa FixedOrder = otomatis nempel di urutan tab terakhir
     end)
 
     if not ok_tab or not Tab then
@@ -194,12 +201,10 @@ do
         end,
     })
 
-        -----------------------------------------------------------------
+    -----------------------------------------------------------------
     -- SECTION: SHOP (Dikategorikan per Prefix + Nama & Tier)
     -----------------------------------------------------------------
     Tab:CreateSection("Auto Buy Shop")
-
-    local TIER_NAMES = (ShopData and ShopData.TIER_NAMES) or {}
 
     -----------------------------------------------------------------
     -- Klasifikasi item berdasarkan prefix:
@@ -374,6 +379,7 @@ do
 
     -----------------------------------------------------------------
     -- Monitor RestockText -> deteksi refresh stock via ContentText
+    -- Hanya trigger buy PERSIS saat stock baru muncul (bukan spam tiap detik)
     -----------------------------------------------------------------
     local function GetRestockLabel()
         local ok, label = pcall(function()
@@ -384,6 +390,7 @@ do
     end
 
     local function ParseRemainingSeconds(text)
+        -- format contoh: "NEW STOCK IN 4:59"
         local m, s = text:match("(%d+):(%d+)")
         if m and s then
             return tonumber(m) * 60 + tonumber(s)
@@ -391,6 +398,7 @@ do
         return nil
     end
 
+    -- 1 thread ringan, cek tiap 1 detik saja (bukan busy loop) supaya CPU tetap adem
     task.spawn(function()
         local lastRemaining = nil
         print("[BankShop][Debug] Thread monitor RestockText dimulai.")
@@ -402,8 +410,10 @@ do
                 if ok and text then
                     local remaining = ParseRemainingSeconds(text)
                     if remaining then
+                        -- Deteksi restock: waktu tiba2 melompat naik jauh dari sebelumnya
+                        -- (misal dari 0:02 -> 4:59), artinya cycle baru dimulai
                         if lastRemaining and remaining > lastRemaining + 60 then
-                            print("[BankShop][Debug] Restock terdeteksi!")
+                            print("[BankShop][Debug] Restock terdeteksi! lastRemaining=" .. tostring(lastRemaining) .. " -> remaining=" .. tostring(remaining))
                             if AutoBuyEnabled then
                                 TryBuySelected()
                             end
