@@ -59,9 +59,7 @@ end
 
 --======================================================================
 -- [[ BANK & SHOP - INLINE (DEBUG MODE) ]]
--- Menggunakan konstanta hash yang SAMA PERSIS dengan JobModule.lua,
--- karena ini memang pola yang sudah established di codebase & sudah
--- terbukti jalan normal di fitur Auto Job.
+-- Menggunakan konstanta hash yang SAMA PERSIS dengan JobModule.lua
 --======================================================================
 do
     local Players = game:GetService("Players")
@@ -75,37 +73,21 @@ do
 
     print("[BankShop][Debug] Mulai inisialisasi Bank & Shop inline...")
     print("[BankShop][Debug] Jumlah item SHOP terload: " .. #SHOP)
-    print("[BankShop][Debug] Menggunakan ACTION_HASH (sama seperti JobModule): " .. ACTION_HASH)
-
-    -----------------------------------------------------------------
-    -- Ambil MainTab dari Context, konsisten dengan pola JobModule.lua
-    -- (JobModule pakai Context.MainTab, bukan bikin Tab baru sendiri)
-    -----------------------------------------------------------------
-    local MainTab = Context.MainTab
-    local Tab
-
-    if MainTab then
-        -- Kalau JobModule/PropertyModule/dll semua nempel ke MainTab yang sama,
-        -- kemungkinan Context.MainTab itu tab "Auto Farm" yang sudah ada.
-        -- Untuk Bank & Shop kita tetap mau bikin TAB BARU terpisah,
-        -- jadi pakai LunoLibrary:CreateTab() langsung.
-        print("[BankShop][Debug] Context.MainTab ditemukan, tapi kita tetap buat Tab baru 'Bank & Shop' via LunoLibrary:CreateTab().")
-    end
+    print("[BankShop][Debug] Menggunakan ACTION_HASH: " .. ACTION_HASH)
 
     if type(LunoLibrary.CreateTab) ~= "function" then
         warn("[BankShop][Debug] LunoLibrary:CreateTab tidak ditemukan!")
         return
     end
 
-    local ok_tab, NewTab = pcall(function()
+    local ok_tab, Tab = pcall(function()
         return LunoLibrary:CreateTab("Bank & Shop")
     end)
 
-    if not ok_tab or not NewTab then
-        warn("[BankShop][Debug] Gagal buat Tab 'Bank & Shop': " .. tostring(NewTab))
+    if not ok_tab or not Tab then
+        warn("[BankShop][Debug] Gagal buat Tab 'Bank & Shop': " .. tostring(Tab))
         return
     end
-    Tab = NewTab
     print("[BankShop][Debug] Tab 'Bank & Shop' berhasil dibuat.")
 
     local function Notify(title, content, duration)
@@ -142,7 +124,7 @@ do
     print("[BankShop][Debug] Remotes Deposit & BuyShopItem berhasil diambil.")
 
     -----------------------------------------------------------------
-    -- SECTION: BANK
+    -- SECTION: BANK (SIMPLIFIED - Toggle Only, Auto Otomatis)
     -----------------------------------------------------------------
     Tab:CreateSection("Auto Deposit Bank")
 
@@ -161,19 +143,9 @@ do
         end,
     })
 
-    local DepositDelay = 1.5
-    Tab:CreateSlider({
-        Title = "Delay Antar Deposit",
-        Min = 1,
-        Max = 50,
-        Default = 15,
-        Suffix = " (x0.1 detik)",
-        Flag = "BankDepositDelay",
-        Callback = function(val)
-            DepositDelay = val / 10
-            print("[BankShop][Debug] DepositDelay diset ke: " .. DepositDelay)
-        end,
-    })
+    -- Delay internal aman, tidak perlu di-expose ke user (anti CPU/memory spike)
+    local INTERNAL_DEPOSIT_DELAY = 1.5
+    local INTERNAL_DEPOSIT_DELAY_ON_FAIL = 3
 
     local function DoDeposit()
         local ok, result = pcall(function()
@@ -199,11 +171,12 @@ do
     local AutoDepositEnabled = false
 
     Tab:CreateToggle({
-        Title = "Auto Deposit (Loop Aman dengan Delay)",
+        Title = "Auto Deposit",
         Default = false,
         Flag = "AutoDepositEnabled",
         Callback = function(value)
             AutoDepositEnabled = value
+
             if not value then
                 Notify("Bank", "Auto Deposit dihentikan", 3)
                 return
@@ -214,45 +187,101 @@ do
             task.spawn(function()
                 while AutoDepositEnabled do
                     local success = DoDeposit()
-                    task.wait(success and DepositDelay or (DepositDelay * 2))
+                    task.wait(success and INTERNAL_DEPOSIT_DELAY or INTERNAL_DEPOSIT_DELAY_ON_FAIL)
                 end
                 print("[BankShop][Debug] Loop Auto Deposit berhenti.")
             end)
         end,
     })
 
-    Tab:CreateButton({
-        Title = "Deposit Sekali (untuk testing manual)",
-        Callback = function()
-            local success = DoDeposit()
-            Notify("Bank", success and "Deposit berhasil" or "Deposit gagal", 3)
-        end,
-    })
-
     -----------------------------------------------------------------
-    -- SECTION: SHOP
+    -- SECTION: SHOP (Dikategorikan per Prefix)
     -----------------------------------------------------------------
     Tab:CreateSection("Auto Buy Shop")
 
-    local ItemOptions = {}
-    for _, data in ipairs(SHOP) do
-        table.insert(ItemOptions, data.item)
+    -----------------------------------------------------------------
+    -- Klasifikasi item berdasarkan prefix:
+    -- w_  = Weapon
+    -- v_  = Vehicle
+    -- a_  = Armor
+    -- b_  = Border
+    -- bg_ = Background
+    -- crate_ = Crate
+    -- lainnya = Other (misal t_goldenrat, dll)
+    -----------------------------------------------------------------
+    local function GetItemCategory(itemId)
+        if itemId:sub(1, 3) == "bg_" then
+            return "Background"
+        end
+
+        local prefix = itemId:match("^(%a+)_")
+        if prefix == "w" then
+            return "Weapon"
+        elseif prefix == "v" then
+            return "Vehicle"
+        elseif prefix == "a" then
+            return "Armor"
+        elseif prefix == "b" then
+            return "Border"
+        elseif prefix == "crate" then
+            return "Crate"
+        else
+            return "Other"
+        end
     end
-    if #ItemOptions == 0 then ItemOptions = {"No Items"} end
 
-    local SelectedItems = {}
+    local CategoryOrder = { "Weapon", "Vehicle", "Armor", "Border", "Background", "Crate", "Other" }
 
-    Tab:CreateDropdown({
-        Title = "Pilih Item untuk Auto Buy",
-        Options = ItemOptions,
-        Multi = true,
-        Default = {},
-        Flag = "ShopSelectedItems",
-        Callback = function(options)
-            SelectedItems = options or {}
-            print("[BankShop][Debug] SelectedItems: " .. table.concat(SelectedItems, ", "))
-        end,
-    })
+    local GroupedItems = {
+        Weapon = {},
+        Vehicle = {},
+        Armor = {},
+        Border = {},
+        Background = {},
+        Crate = {},
+        Other = {},
+    }
+
+    for _, data in ipairs(SHOP) do
+        local cat = GetItemCategory(data.item)
+        table.insert(GroupedItems[cat], data.item)
+    end
+
+    for _, catName in ipairs(CategoryOrder) do
+        print(("[BankShop][Debug] Kategori %s: %d item"):format(catName, #GroupedItems[catName]))
+    end
+
+    local SelectedByCategory = {}
+    for _, catName in ipairs(CategoryOrder) do
+        SelectedByCategory[catName] = {}
+    end
+
+    for _, catName in ipairs(CategoryOrder) do
+        local items = GroupedItems[catName]
+        if #items > 0 then
+            Tab:CreateDropdown({
+                Title = "Pilih Item: " .. catName,
+                Options = items,
+                Multi = true,
+                Default = {},
+                Flag = "ShopSelected_" .. catName,
+                Callback = function(options)
+                    SelectedByCategory[catName] = options or {}
+                    print(("[BankShop][Debug] Selected %s: %s"):format(catName, table.concat(SelectedByCategory[catName], ", ")))
+                end,
+            })
+        end
+    end
+
+    local function GetAllSelectedItems()
+        local combined = {}
+        for _, catName in ipairs(CategoryOrder) do
+            for _, itemId in ipairs(SelectedByCategory[catName]) do
+                table.insert(combined, itemId)
+            end
+        end
+        return combined
+    end
 
     local BuyDelay = 0.5
     local AutoBuyEnabled = false
@@ -277,8 +306,10 @@ do
     end
 
     local function TryBuySelected()
+        local SelectedItems = GetAllSelectedItems()
+
         if #SelectedItems == 0 then
-            print("[BankShop][Debug] Tidak ada item terpilih.")
+            print("[BankShop][Debug] Tidak ada item terpilih di kategori manapun.")
             return
         end
 
