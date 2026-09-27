@@ -1,93 +1,55 @@
--- [[ MAIN LOADER - LUNO / LYORA X UI ]] --
+-- [[ MAIN LOADER - CLEAN & OBFUSCATION FRIENDLY ]] --
+-- File ini SENGAJA dibuat setipis mungkin. Semua logic berat
+-- dipecah jadi module terpisah agar tidak membebani proses
+-- obfuscation & runtime deobfuscation (mencegah CPU/Memory spike).
 
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
+local BASE_URL = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/"
+local LIB_URL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
 
-local BaseModuleUrl = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/"
+local function LoadRemote(url)
+    local ok, src = pcall(game.HttpGet, game, url)
+    if not ok then
+        error("[Loader] Gagal fetch: " .. url .. " | " .. tostring(src))
+    end
 
-local function LoadModule(name)
-    return loadstring(game:HttpGet(BaseModuleUrl .. name))()
+    local ok2, mod = pcall(loadstring(src))
+    if not ok2 then
+        error("[Loader] Gagal compile: " .. url .. " | " .. tostring(mod))
+    end
+
+    return mod
 end
 
--- 1. Load Library
-local LunoLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
+-- 1. Load Library UI
+local LunoLibrary = LoadRemote(LIB_URL)
 
--- 2. Load Core Modules
-local Config = LoadModule("Config.lua")
-local Utils = LoadModule("Utils.lua")
-local Scheduler = LoadModule("Scheduler.lua")
-local NotifyModule = LoadModule("NotifyQueue.lua")
+-- 2. Load Data Modules (JSON-like data, ringan)
+local JobsData = LoadRemote(BASE_URL .. "JobsData.lua")
+local OperationsData = LoadRemote(BASE_URL .. "OperationsData.lua")
+local PropertiesData = LoadRemote(BASE_URL .. "PropertiesData.lua")
 
-local QueueNotify = NotifyModule.Create(LunoLibrary)
+-- 3. Load Shared Core (utils, scheduler, state monitor, UI window/tabs)
+local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
+local Context = SharedCore.Init(LunoLibrary)
 
-local function ForceSetToggleOff(toggleObject, flagName)
-    Utils.ForceSetToggleOff(LunoLibrary, toggleObject, flagName)
-end
-
--- 3. Load Data
-local JobsData = LoadModule("JobsData.lua")
-local OperationsData = LoadModule("OperationsData.lua")
-local PropertiesData = LoadModule("PropertiesData.lua") -- BARU
-
--- 4. Load Feature Modules
-local StateMonitor = LoadModule("StateMonitor.lua")
-local JobManager = LoadModule("JobManager.lua")
-local OperationsManager = LoadModule("OperationsManager.lua")
-local DailyReward = LoadModule("DailyReward.lua")
-local TasksManager = LoadModule("TasksManager.lua")
-local SkillAllocation = LoadModule("SkillAllocation.lua")
-local PropertyManager = LoadModule("PropertyManager.lua") -- BARU
-
--- 5. Init State Monitor (Level & Bars)
-local State = StateMonitor.Init(Utils, Config, Scheduler)
-
--- 6. Build UI Window & Tabs
-local Window = LunoLibrary:CreateWindow({
-    Title = Config.WindowTitle,
-    SubTitle = Config.WindowSubTitle,
-    Discord = Config.DiscordUrl
-})
-
-local MainTab = Window:CreateTab("Auto Farm")
-local OperationsTab = Window:CreateTab("Operations")
-local PropertyTab = Window:CreateTab("Property") -- BARU
-
--- 7. Common Dependencies
-local CommonDeps = {
-    ReplicatedStorage = ReplicatedStorage,
-    Config = Config,
-    Scheduler = Scheduler,
-    QueueNotify = QueueNotify,
-    ForceSetToggleOff = ForceSetToggleOff,
-    Utils = Utils,
-    State = State,
-    LocalPlayer = LocalPlayer,
+-- 4. Load & Init tiap fitur sebagai module terpisah
+local FeatureModules = {
+    { url = BASE_URL .. "JobModule.lua",         args = { JobsData.JOBS } },
+    { url = BASE_URL .. "OperationModule.lua",   args = { OperationsData.OPERATIONS } },
+    { url = BASE_URL .. "PropertyModule.lua",    args = { PropertiesData.PROPERTIES } },
+    { url = BASE_URL .. "DailyRewardModule.lua", args = {} },
+    { url = BASE_URL .. "TaskModule.lua",        args = {} },
+    { url = BASE_URL .. "AllocationModule.lua",  args = {} },
 }
 
--- 8. Init Job Manager
-local JobDeps = {}
-for k, v in pairs(CommonDeps) do JobDeps[k] = v end
-JobDeps.JOBS = JobsData.JOBS
-JobManager.Init(MainTab, JobDeps)
-
--- 9. Init Operations Manager
-local OpsDeps = {}
-for k, v in pairs(CommonDeps) do OpsDeps[k] = v end
-OpsDeps.OPERATIONS = OperationsData.OPERATIONS
-OperationsManager.Init(OperationsTab, OpsDeps)
-
--- 10. Init Daily Reward
-DailyReward.Init(MainTab, CommonDeps)
-
--- 11. Init Daily & Weekly Task
-TasksManager.Init(MainTab, CommonDeps)
-
--- 12. Init Skill Allocation
-SkillAllocation.Init(MainTab, CommonDeps)
-
--- 13. Init Property Manager (BARU)
-local PropDeps = {}
-for k, v in pairs(CommonDeps) do PropDeps[k] = v end
-PropDeps.PROPERTIES = PropertiesData.PROPERTIES
-PropertyManager.Init(PropertyTab, PropDeps)
+for _, feature in ipairs(FeatureModules) do
+    local ok, mod = pcall(LoadRemote, feature.url)
+    if ok and mod and mod.Init then
+        local initOk, initErr = pcall(mod.Init, Context, table.unpack(feature.args))
+        if not initOk then
+            warn("[FeatureInit Error] " .. feature.url .. ": " .. tostring(initErr))
+        end
+    else
+        warn("[FeatureLoad Error] " .. feature.url .. ": " .. tostring(mod))
+    end
+end
