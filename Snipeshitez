@@ -62,3 +62,294 @@ for i, feature in ipairs(FeatureModules) do
         warn("[FeatureLoad Error] " .. feature.url .. ": " .. tostring(mod))
     end
 end
+
+--[[
+    ============================================================
+    CREW UPGRADE (INLINE - TIDAK DIPISAH JADI MODULE)
+    Tab sendiri: "Crew Upgrade"
+
+    Logic Reroll:
+    1. MODE RANGE  -> Reroll mulai dari SlotAwal sampai SlotAkhir.
+       Tiap slot akan di-dismiss lalu hire ulang berkali-kali sampai
+       dapet rarity >= target, baru lanjut ke slot berikutnya.
+
+    2. MODE SINGLE -> Hanya reroll SATU slot tertentu terus menerus
+       sampai dapet rarity target, lalu berhenti (tidak lanjut slot lain).
+    ============================================================
+--]]
+
+do
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+    -- Sama persis dengan JOB_HASH di JobModule.lua
+    local ACTION_HASH = "ca01587a32b24eb1a0527e8e595e8483"
+
+    local okRemote, CrewEvent = pcall(function()
+        return ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("CrewAction")
+    end)
+
+    if okRemote and CrewEvent then
+        ------------------------------------------------------------
+        -- TAB SENDIRI: "Crew Upgrade"
+        ------------------------------------------------------------
+        local CrewTab = LunoLibrary:CreateTab("Crew Upgrade")
+
+        local Running = false
+        local StopRequested = false
+
+        local Settings = {
+            Mode          = "Range", -- "Range" atau "Single"
+            StartSlot     = 2,
+            EndSlot       = 6,
+            TargetSlot    = 2,       -- dipakai kalau Mode == "Single"
+            TargetRarity  = 6,
+            HireType      = "street",
+            ActionDelay   = 0.3,
+            MaxAttempts   = 200,     -- batas percobaan per slot biar gak infinite loop
+        }
+
+        ------------------------------------------------------------
+        -- HELPER: Safe Invoke
+        ------------------------------------------------------------
+        local function SafeInvoke(...)
+            local args = { ... }
+            local ok, result = pcall(function()
+                return table.pack(CrewEvent:InvokeServer(table.unpack(args)))
+            end)
+            if ok then
+                return result
+            end
+            return nil
+        end
+
+        local function DismissSlot(slot)
+            return SafeInvoke(ACTION_HASH, "dismiss", slot, nil, nil)
+        end
+
+        local function HireCrew(hireType)
+            return SafeInvoke(ACTION_HASH, "hire", hireType, nil, nil)
+        end
+
+        local function ExtractResult(packedResult)
+            if packedResult and packedResult[1] and type(packedResult[1]) == "table" then
+                local data = packedResult[1]
+                if data.ok and data.member then
+                    return true, data.member.rarity, data.index, data.member
+                end
+                return false, nil, nil, nil
+            end
+            return false, nil, nil, nil
+        end
+
+        ------------------------------------------------------------
+        -- CORE LOGIC: Reroll 1 slot sampai target rarity tercapai
+        ------------------------------------------------------------
+        local function RerollSlotUntilTarget(slot, targetRarity)
+            local attempts = 0
+
+            while not StopRequested and attempts < Settings.MaxAttempts do
+                attempts = attempts + 1
+
+                -- 1. Kosongkan slot (buang member yang ada di situ)
+                DismissSlot(slot)
+                task.wait(Settings.ActionDelay)
+
+                -- 2. Hire baru (otomatis ngisi slot kosong terkecil)
+                local hireResult = HireCrew(Settings.HireType)
+                task.wait(Settings.ActionDelay)
+
+                local ok, rarity, index, member = ExtractResult(hireResult)
+
+                if not ok then
+                    LunoLibrary:Notify({
+                        Title = "Crew Reroll Gagal",
+                        Content = "Invoke gagal di slot " .. tostring(slot) .. ", proses dihentikan.",
+                        Duration = 2.5
+                    })
+                    return false
+                end
+
+                LunoLibrary:Notify({
+                    Title = "Reroll Slot " .. tostring(slot),
+                    Content = string.format("%s | Rarity: %d | Percobaan: %d", tostring(member.name), rarity, attempts),
+                    Duration = 1.2
+                })
+
+                if rarity >= targetRarity then
+                    LunoLibrary:Notify({
+                        Title = "Target Tercapai!",
+                        Content = "Slot " .. tostring(slot) .. " berhasil dapat rarity " .. tostring(rarity),
+                        Duration = 2.5
+                    })
+                    return true
+                end
+
+                if StopRequested then
+                    return false
+                end
+            end
+
+            LunoLibrary:Notify({
+                Title = "Reroll Berhenti",
+                Content = "Slot " .. tostring(slot) .. " mencapai batas maksimal percobaan.",
+                Duration = 2.5
+            })
+            return false
+        end
+
+        ------------------------------------------------------------
+        -- MAIN RUNNER
+        ------------------------------------------------------------
+        local function StartCrewReroll()
+            if Running then return end
+            Running = true
+            StopRequested = false
+
+            task.spawn(function()
+                if Settings.Mode == "Single" then
+                    RerollSlotUntilTarget(Settings.TargetSlot, Settings.TargetRarity)
+                else
+                    for slot = Settings.StartSlot, Settings.EndSlot do
+                        if StopRequested then break end
+                        local success = RerollSlotUntilTarget(slot, Settings.TargetRarity)
+                        if not success then
+                            break
+                        end
+                    end
+                end
+
+                Running = false
+                if LunoLibrary.Elements and LunoLibrary.Elements["CrewAutoRerollToggle"] then
+                    pcall(function() LunoLibrary.Elements["CrewAutoRerollToggle"].Set(false) end)
+                end
+
+                LunoLibrary:Notify({
+                    Title = "Crew Reroll",
+                    Content = "Proses selesai / dihentikan.",
+                    Duration = 2
+                })
+            end)
+        end
+
+        local function StopCrewReroll()
+            StopRequested = true
+        end
+
+        ------------------------------------------------------------
+        -- UI ELEMENTS
+        ------------------------------------------------------------
+        CrewTab:CreateSection("Konfigurasi Reroll Crew")
+
+        CrewTab:CreateDropdown({
+            Title = "Mode Reroll",
+            Options = {"Range (Slot Awal - Akhir)", "Single Slot Saja"},
+            Default = "Range (Slot Awal - Akhir)",
+            Flag = "CrewRerollMode",
+            Callback = function(Value)
+                if Value == "Single Slot Saja" then
+                    Settings.Mode = "Single"
+                else
+                    Settings.Mode = "Range"
+                end
+            end
+        })
+
+        CrewTab:CreateSlider({
+            Title = "Slot Awal / Target Slot (Single)",
+            Min = 1,
+            Max = 10,
+            Default = 2,
+            Suffix = "",
+            Flag = "CrewStartSlot",
+            Callback = function(Value)
+                Settings.StartSlot = Value
+                Settings.TargetSlot = Value
+            end
+        })
+
+        CrewTab:CreateSlider({
+            Title = "Slot Akhir (Hanya Mode Range)",
+            Min = 1,
+            Max = 10,
+            Default = 6,
+            Suffix = "",
+            Flag = "CrewEndSlot",
+            Callback = function(Value)
+                Settings.EndSlot = Value
+            end
+        })
+
+        CrewTab:CreateSlider({
+            Title = "Target Rarity",
+            Min = 1,
+            Max = 6,
+            Default = 6,
+            Suffix = " star",
+            Flag = "CrewTargetRarity",
+            Callback = function(Value)
+                Settings.TargetRarity = Value
+            end
+        })
+
+        CrewTab:CreateInput({
+            Title = "Hire Type",
+            Placeholder = "street",
+            Callback = function(Text)
+                if Text and #Text > 0 then
+                    Settings.HireType = Text
+                end
+            end
+        })
+
+        CrewTab:CreateSlider({
+            Title = "Delay Antar Aksi",
+            Min = 1,
+            Max = 20,
+            Default = 3,
+            Suffix = " x0.1s",
+            Flag = "CrewActionDelay",
+            Callback = function(Value)
+                Settings.ActionDelay = Value / 10
+            end
+        })
+
+        CrewTab:CreateSlider({
+            Title = "Max Percobaan / Slot",
+            Min = 10,
+            Max = 500,
+            Default = 200,
+            Suffix = "x",
+            Flag = "CrewMaxAttempts",
+            Callback = function(Value)
+                Settings.MaxAttempts = Value
+            end
+        })
+
+        CrewTab:CreateSection("Kontrol")
+
+        CrewTab:CreateToggle({
+            Title = "Mulai Auto Reroll Crew",
+            Default = false,
+            Flag = "CrewAutoRerollToggle",
+            Callback = function(State)
+                if State then
+                    StartCrewReroll()
+                else
+                    StopCrewReroll()
+                end
+            end
+        })
+
+        CrewTab:CreateButton({
+            Title = "Force Stop",
+            Callback = function()
+                StopCrewReroll()
+                if LunoLibrary.Elements and LunoLibrary.Elements["CrewAutoRerollToggle"] then
+                    pcall(function() LunoLibrary.Elements["CrewAutoRerollToggle"].Set(false) end)
+                end
+            end
+        })
+    else
+        warn("[CrewUpgrade] Gagal menemukan CrewAction Remote.")
+    end
+end
