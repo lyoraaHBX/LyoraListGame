@@ -59,174 +59,87 @@ end
 
 --======================================================================
 -- [[ BANK & SHOP - INLINE (DEBUG MODE) ]]
--- FIX: Hook SEMPIT hanya ke GetHitList.InvokeServer (BUKAN __namecall global)
--- supaya tidak mengganggu method call lain yang dipakai UI Library.
+-- Menggunakan konstanta hash yang SAMA PERSIS dengan JobModule.lua,
+-- karena ini memang pola yang sudah established di codebase & sudah
+-- terbukti jalan normal di fitur Auto Job.
 --======================================================================
 do
     local Players = game:GetService("Players")
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local ReplicatedStorage = Context.ReplicatedStorage or game:GetService("ReplicatedStorage")
     local LocalPlayer = Players.LocalPlayer
 
     local SHOP = (ShopData and ShopData.SHOP) or {}
 
+    -- Sama persis dengan JOB_HASH di JobModule.lua
+    local ACTION_HASH = "ca01587a32b24eb1a0527e8e595e8483"
+
     print("[BankShop][Debug] Mulai inisialisasi Bank & Shop inline...")
     print("[BankShop][Debug] Jumlah item SHOP terload: " .. #SHOP)
+    print("[BankShop][Debug] Menggunakan ACTION_HASH (sama seperti JobModule): " .. ACTION_HASH)
+
+    -----------------------------------------------------------------
+    -- Ambil MainTab dari Context, konsisten dengan pola JobModule.lua
+    -- (JobModule pakai Context.MainTab, bukan bikin Tab baru sendiri)
+    -----------------------------------------------------------------
+    local MainTab = Context.MainTab
+    local Tab
+
+    if MainTab then
+        -- Kalau JobModule/PropertyModule/dll semua nempel ke MainTab yang sama,
+        -- kemungkinan Context.MainTab itu tab "Auto Farm" yang sudah ada.
+        -- Untuk Bank & Shop kita tetap mau bikin TAB BARU terpisah,
+        -- jadi pakai LunoLibrary:CreateTab() langsung.
+        print("[BankShop][Debug] Context.MainTab ditemukan, tapi kita tetap buat Tab baru 'Bank & Shop' via LunoLibrary:CreateTab().")
+    end
 
     if type(LunoLibrary.CreateTab) ~= "function" then
         warn("[BankShop][Debug] LunoLibrary:CreateTab tidak ditemukan!")
         return
     end
 
-    local ok_tab, Tab = pcall(function()
+    local ok_tab, NewTab = pcall(function()
         return LunoLibrary:CreateTab("Bank & Shop")
     end)
 
-    if not ok_tab or not Tab then
-        warn("[BankShop][Debug] Gagal buat Tab 'Bank & Shop': " .. tostring(Tab))
+    if not ok_tab or not NewTab then
+        warn("[BankShop][Debug] Gagal buat Tab 'Bank & Shop': " .. tostring(NewTab))
         return
     end
+    Tab = NewTab
     print("[BankShop][Debug] Tab 'Bank & Shop' berhasil dibuat.")
 
     local function Notify(title, content, duration)
         print(("[BankShop][Notify] %s: %s"):format(title, tostring(content)))
-        pcall(function()
-            LunoLibrary:Notify({ Title = title, Content = content, Duration = duration or 3 })
+        local ok = pcall(function()
+            if Context.QueueNotify then
+                Context.QueueNotify({ Title = title, Content = content, Duration = duration or 3 })
+            else
+                LunoLibrary:Notify({ Title = title, Content = content, Duration = duration or 3 })
+            end
         end)
+        if not ok then
+            pcall(function()
+                LunoLibrary:Notify({ Title = title, Content = content, Duration = duration or 3 })
+            end)
+        end
     end
 
     -----------------------------------------------------------------
     -- Remotes
     -----------------------------------------------------------------
-    local ok_remotes, DepositEvent, BuyShopEvent, GetHitListEvent = pcall(function()
+    local ok_remotes, DepositEvent, BuyShopEvent = pcall(function()
         local MWFolder = ReplicatedStorage:WaitForChild("MW", 10)
         local RemotesFolder = MWFolder:WaitForChild("Remotes", 10)
         local dep = RemotesFolder:WaitForChild("Deposit", 10)
         local buy = RemotesFolder:WaitForChild("BuyShopItem", 10)
-        local hitlist = RemotesFolder:FindFirstChild("GetHitList")
-        return dep, buy, hitlist
+        return dep, buy
     end)
 
     if not ok_remotes then
-        warn("[BankShop][Debug] Gagal ambil remotes: " .. tostring(DepositEvent))
+        warn("[BankShop][Debug] Gagal ambil remotes Deposit/BuyShopItem: " .. tostring(DepositEvent))
         return
     end
     print("[BankShop][Debug] Remotes Deposit & BuyShopItem berhasil diambil.")
-
-    -----------------------------------------------------------------
-    -- ============================================================
-    -- AUTO-CAPTURE CHARACTER ID (TARGETED HOOK - AMAN UNTUK UI)
-    -- ============================================================
-    -- Hanya hook InvokeServer milik remote "GetHitList" saja,
-    -- BUKAN __namecall global. Ini jauh lebih aman karena tidak
-    -- menyentuh method call lain (TweenService, Instance.new,
-    -- drag/resize UI, dll) sehingga UI tidak akan rusak/gagal load.
-    -----------------------------------------------------------------
-    local CachedCharId = nil
-
-    local function IsLikelyCharId(str)
-        if type(str) ~= "string" then return false end
-        if #str ~= 32 then return false end
-        return str:match("^%x+$") ~= nil
-    end
-
-    local HookSuccess = false
-
-    if GetHitListEvent then
-        local ok_hook = pcall(function()
-            local OldInvokeServer
-            OldInvokeServer = hookfunction(GetHitListEvent.InvokeServer, function(self, ...)
-                local args = {...}
-
-                if not CachedCharId then
-                    for _, arg in ipairs(args) do
-                        if IsLikelyCharId(arg) then
-                            CachedCharId = arg
-                            print("[BankShop][Hook] Character ID tertangkap dari GetHitList: " .. arg)
-                            break
-                        end
-                    end
-                end
-
-                return OldInvokeServer(self, ...)
-            end)
-        end)
-
-        HookSuccess = ok_hook
-        if ok_hook then
-            print("[BankShop][Debug] Hook GetHitList.InvokeServer berhasil dipasang.")
-        else
-            warn("[BankShop][Debug] hookfunction gagal (executor mungkin tidak support). Fallback ke deteksi manual.")
-        end
-    else
-        warn("[BankShop][Debug] Remote 'GetHitList' tidak ditemukan di MW.Remotes! Skip hook, pakai fallback.")
-    end
-
-    -----------------------------------------------------------------
-    -- Fallback tambahan kalau hook tidak berhasil / belum ke-trigger
-    -----------------------------------------------------------------
-    local function TryFallbackDetection()
-        if CachedCharId then return CachedCharId end
-
-        local ok, id = pcall(function()
-            return LocalPlayer:GetAttribute("ActiveCharacterId")
-                or LocalPlayer:GetAttribute("CharacterId")
-                or LocalPlayer:GetAttribute("CharId")
-                or LocalPlayer:GetAttribute("SelectedCharacterId")
-        end)
-        if ok and id and id ~= "" then
-            print("[BankShop][Debug] Fallback: CharacterId dari Player Attribute: " .. tostring(id))
-            CachedCharId = tostring(id)
-            return CachedCharId
-        end
-
-        local searchLocations = { LocalPlayer, LocalPlayer:FindFirstChild("PlayerGui") }
-        local possibleNames = { "CharacterId", "ActiveCharacterId", "SelectedCharacterId", "CharId", "ActiveCharacter" }
-
-        for _, location in ipairs(searchLocations) do
-            if location then
-                for _, name in ipairs(possibleNames) do
-                    local found = location:FindFirstChild(name, true)
-                    if found and (found:IsA("StringValue") or found:IsA("ObjectValue")) then
-                        local val = found.Value
-                        if val and tostring(val) ~= "" then
-                            print(("[BankShop][Debug] Fallback: CharacterId ditemukan di %s.%s = %s"):format(location.Name, found.Name, tostring(val)))
-                            CachedCharId = tostring(val)
-                            return CachedCharId
-                        end
-                    end
-                end
-            end
-        end
-
-        return nil
-    end
-
-    local function GetCharacterId()
-        if CachedCharId then return CachedCharId end
-        return TryFallbackDetection()
-    end
-
-    -----------------------------------------------------------------
-    -- Trigger manual: paksa panggil GetHitList sendiri kalau perlu
-    -- (opsional, kalau game tidak auto-invoke remote ini saat idle)
-    -----------------------------------------------------------------
-    Tab:CreateButton({
-        Title = "Trigger Cari ID (Panggil GetHitList Manual)",
-        Callback = function()
-            if not GetHitListEvent then
-                Notify("Debug", "Remote GetHitList tidak ditemukan di game ini.", 3)
-                return
-            end
-            -- Panggil dengan ID kosong hanya untuk memancing hook menangkap
-            -- ID asli kalau game auto-melengkapi/mengoreksi di response,
-            -- ATAU untuk sekadar memastikan remote ini reachable.
-            local ok, result = pcall(function()
-                return GetHitListEvent:InvokeServer("", false)
-            end)
-            print("[BankShop][Debug] Manual trigger GetHitList result: " .. tostring(ok) .. " | " .. tostring(result))
-            Notify("Debug", "Trigger terkirim, cek console untuk hasil.", 3)
-        end,
-    })
 
     -----------------------------------------------------------------
     -- SECTION: BANK
@@ -263,14 +176,8 @@ do
     })
 
     local function DoDeposit()
-        local charId = GetCharacterId()
-        if not charId then
-            Notify("Bank", "Character ID belum terdeteksi! Klik 'Trigger Cari ID' atau buka panel Bank/Shop di game dulu.", 5)
-            return false
-        end
-
         local ok, result = pcall(function()
-            return table.pack(DepositEvent:InvokeServer(charId, DepositAmount))
+            return table.pack(DepositEvent:InvokeServer(ACTION_HASH, DepositAmount))
         end)
 
         if not ok then
@@ -351,14 +258,8 @@ do
     local AutoBuyEnabled = false
 
     local function BuyItem(itemId)
-        local charId = GetCharacterId()
-        if not charId then
-            Notify("Shop", "Character ID belum terdeteksi!", 4)
-            return false
-        end
-
         local ok, result = pcall(function()
-            return table.pack(BuyShopEvent:InvokeServer(charId, itemId, nil, nil))
+            return table.pack(BuyShopEvent:InvokeServer(ACTION_HASH, itemId, nil, nil))
         end)
 
         if not ok then
@@ -415,20 +316,8 @@ do
         end,
     })
 
-    Tab:CreateButton({
-        Title = "Cek Status Character ID (Debug)",
-        Callback = function()
-            local id = GetCharacterId()
-            if id then
-                Notify("Debug", "Character ID aktif: " .. id, 5)
-            else
-                Notify("Debug", "Character ID BELUM ketemu.", 5)
-            end
-        end,
-    })
-
     -----------------------------------------------------------------
-    -- Monitor RestockText
+    -- Monitor RestockText -> deteksi refresh stock via ContentText
     -----------------------------------------------------------------
     local function GetRestockLabel()
         local ok, label = pcall(function()
@@ -465,12 +354,14 @@ do
                         end
                         lastRemaining = remaining
                     end
+                else
+                    warn("[BankShop][Debug] Gagal baca ContentText RestockText: " .. tostring(text))
                 end
             end
             task.wait(1)
         end
     end)
 
-    Notify("Bank & Shop", "Module dimuat! " .. (HookSuccess and "Hook GetHitList aktif." or "Hook gagal, pakai fallback."), 5)
+    Notify("Bank & Shop", "Module berhasil dimuat!", 3)
     print("[BankShop][Debug] Inisialisasi Bank & Shop inline selesai.")
 end
