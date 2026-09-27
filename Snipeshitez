@@ -1,4 +1,5 @@
 -- [[ AUTO JOB SCRIPT - LUNO / LYORA X UI ]] --
+-- [[ OPTIMIZED FOR CLIENT CPU (ANTI FREEZE/LAG DI HP/PC/TABLET) ]] --
 
 -- 1. Load Library Lyora X
 local LibraryUrl = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
@@ -17,6 +18,7 @@ local OPERATIONS = OperationsData.OPERATIONS
 -- 2. Service & Remotes
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local DoJobRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("DoJob")
@@ -55,6 +57,76 @@ for _, op in ipairs(OPERATIONS) do
     table.insert(OperationNamesList, displayName)
     OperationMap[displayName] = op.id
     OPERATIONS_BY_ID[op.id] = op
+end
+
+-- =========================================================
+-- UNIFIED SCHEDULER (ANTI-LAG SYSTEM)
+-- Mengganti banyak "task.spawn + while true + task.wait"
+-- dengan SATU Heartbeat loop yang atur semua timer.
+-- Setiap callback yang due di-spawn terpisah (non-blocking)
+-- + ada debounce (busy flag) supaya invoke tidak numpuk
+-- kalau remote lagi lambat respon.
+-- =========================================================
+local Scheduler = {}
+Scheduler.Tasks = {}
+
+function Scheduler:Add(name, interval, callback)
+    self.Tasks[name] = {
+        interval = interval,
+        lastRun = 0,
+        callback = callback,
+        busy = false,
+    }
+end
+
+function Scheduler:Remove(name)
+    self.Tasks[name] = nil
+end
+
+RunService.Heartbeat:Connect(function()
+    local now = tick()
+    for name, t in pairs(Scheduler.Tasks) do
+        if not t.busy and (now - t.lastRun) >= t.interval then
+            t.lastRun = now
+            t.busy = true
+            task.spawn(function()
+                local ok, err = pcall(t.callback)
+                if not ok then
+                    warn("[Scheduler Error] " .. name .. ": " .. tostring(err))
+                end
+                t.busy = false
+            end)
+        end
+    end
+end)
+
+-- =========================================================
+-- NOTIFY THROTTLE (ANTI SPAM UI / ANTI FRAME FREEZE)
+-- Mencegah banyak Notify() nembak bersamaan dalam 1 frame.
+-- Antrian + jeda antar notif = render UI gak numpuk.
+-- =========================================================
+local NotifyQueue = {}
+local NotifyProcessing = false
+
+local function QueueNotify(data)
+    -- Duration diperpendek dikit biar UI gak lama nahan instance
+    data.Duration = data.Duration or 2.5
+
+    table.insert(NotifyQueue, data)
+
+    if not NotifyProcessing then
+        NotifyProcessing = true
+        task.spawn(function()
+            while #NotifyQueue > 0 do
+                local item = table.remove(NotifyQueue, 1)
+                pcall(function()
+                    LunoLibrary:Notify(item)
+                end)
+                task.wait(0.35)
+            end
+            NotifyProcessing = false
+        end)
+    end
 end
 
 -- =========================================================
@@ -102,9 +174,10 @@ local function ReadNodeValue(node)
 end
 
 -- =========================================================
--- LEVEL MONITOR (BACKGROUND - DIPAKAI AUTO JOB, TANPA UI)
+-- LEVEL MONITOR (EVENT-DRIVEN, POLLING CUMA FALLBACK RINGAN)
 -- =========================================================
 local CurrentDetectedLevel = 1
+local LevelNodeRef = nil
 
 local LevelPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "AvatarCard", "AvatarCluster", "AvatarFrame", "LevelBadge"}
 
@@ -115,6 +188,8 @@ local function SetupLevelListener()
         return
     end
 
+    LevelNodeRef = levelBadge
+
     local function UpdateLevel()
         local val = ReadNodeValue(levelBadge)
         CurrentDetectedLevel = val
@@ -122,6 +197,7 @@ local function SetupLevelListener()
 
     UpdateLevel()
 
+    -- EVENT-DRIVEN: update real-time cuma pas value berubah (hemat CPU)
     levelBadge:GetAttributeChangedSignal("ContentText"):Connect(UpdateLevel)
 
     local childText = levelBadge:FindFirstChildOfClass("TextLabel")
@@ -129,12 +205,8 @@ local function SetupLevelListener()
         childText:GetPropertyChangedSignal("Text"):Connect(UpdateLevel)
     end
 
-    task.spawn(function()
-        while levelBadge and levelBadge.Parent do
-            UpdateLevel()
-            task.wait(1)
-        end
-    end)
+    -- TIDAK ADA polling loop terpisah di sini lagi.
+    -- Fallback poll digabung ke Scheduler di bawah (interval besar).
 end
 
 SetupLevelListener()
@@ -156,7 +228,7 @@ local function GetHighestUnlockedJob()
 end
 
 -- =========================================================
--- POOLS MONITOR (BACKGROUND - DIPAKAI AUTO JOB, TANPA UI)
+-- POOLS MONITOR (EVENT-DRIVEN, POLLING CUMA FALLBACK RINGAN)
 -- =========================================================
 local CurrentEnergy, MaxEnergy = 0, 0
 local CurrentStamina, MaxStamina = 0, 0
@@ -166,14 +238,18 @@ local EnergyPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "BarsCluster",
 local StaminaPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "BarsCluster", "StaminaBar", "Value"}
 local HealthPath = {"PlayerGui", "MafiaWarsUI", "Root", "TopBar", "BarsCluster", "HealthBar", "Value"}
 
-local function SetupBarListener(pathParts, updateCallback)
+local BarNodeRefs = { Energy = nil, Stamina = nil, Health = nil }
+
+local function SetupBarListener(pathParts, updateCallback, refKey)
     local node = SafeFindPath(pathParts)
     if not node then
         task.delay(2, function()
-            SetupBarListener(pathParts, updateCallback)
+            SetupBarListener(pathParts, updateCallback, refKey)
         end)
         return
     end
+
+    BarNodeRefs[refKey] = node
 
     local function DoUpdate()
         local val, maxVal = ReadNodeValue(node)
@@ -182,6 +258,7 @@ local function SetupBarListener(pathParts, updateCallback)
 
     DoUpdate()
 
+    -- EVENT-DRIVEN: cuma update pas berubah, gak polling terus
     node:GetAttributeChangedSignal("ContentText"):Connect(DoUpdate)
 
     if node:IsA("ValueBase") then
@@ -193,27 +270,42 @@ local function SetupBarListener(pathParts, updateCallback)
         childText:GetPropertyChangedSignal("Text"):Connect(DoUpdate)
     end
 
-    task.spawn(function()
-        while node and node.Parent do
-            DoUpdate()
-            task.wait(0.5)
-        end
-    end)
+    -- TIDAK ADA polling loop terpisah lagi di sini.
 end
 
 SetupBarListener(EnergyPath, function(val, maxVal)
     CurrentEnergy = val
     MaxEnergy = maxVal
-end)
+end, "Energy")
 
 SetupBarListener(StaminaPath, function(val, maxVal)
     CurrentStamina = val
     MaxStamina = maxVal
-end)
+end, "Stamina")
 
 SetupBarListener(HealthPath, function(val, maxVal)
     CurrentHealth = val
     MaxHealth = maxVal
+end, "Health")
+
+-- Fallback poll GABUNGAN (Level + 3 Bars jadi 1 task, interval besar)
+-- Ini cuma jaring pengaman kalau event listener kelewatan/gagal fire.
+Scheduler:Add("StateFallbackPoll", 5, function()
+    if LevelNodeRef and LevelNodeRef.Parent then
+        CurrentDetectedLevel = ReadNodeValue(LevelNodeRef)
+    end
+    if BarNodeRefs.Energy and BarNodeRefs.Energy.Parent then
+        local v, m = ReadNodeValue(BarNodeRefs.Energy)
+        CurrentEnergy, MaxEnergy = v, m
+    end
+    if BarNodeRefs.Stamina and BarNodeRefs.Stamina.Parent then
+        local v, m = ReadNodeValue(BarNodeRefs.Stamina)
+        CurrentStamina, MaxStamina = v, m
+    end
+    if BarNodeRefs.Health and BarNodeRefs.Health.Parent then
+        local v, m = ReadNodeValue(BarNodeRefs.Health)
+        CurrentHealth, MaxHealth = v, m
+    end
 end)
 
 -- =========================================================
@@ -227,7 +319,7 @@ local Window = LunoLibrary:CreateWindow({
 })
 
 local MainTab = Window:CreateTab("Auto Farm")
-local OperationsTab = Window:CreateTab("Operations") -- TAB BARU
+local OperationsTab = Window:CreateTab("Operations")
 
 -- =========================================================
 -- HELPER: Paksa Matikan Toggle UI Secara Visual (Multi Fallback)
@@ -291,7 +383,7 @@ MainTab:CreateToggle({
         AutoJobEnabled = Value
         if Value then
             local _, lvl, name = GetHighestUnlockedJob()
-            LunoLibrary:Notify({
+            QueueNotify({
                 Title = "Auto Job Started",
                 Content = "Current Level: " .. lvl .. "\nWorking on: " .. name,
                 Duration = 3
@@ -321,17 +413,29 @@ MainTab:CreateDropdown({
     end
 })
 
+-- Auto Job masuk Scheduler (interval 1s)
+Scheduler:Add("AutoJob", 1, function()
+    if not AutoJobEnabled then return end
+
+    local targetJobId = AutoHighestMode and GetHighestUnlockedJob() or SelectedJobId
+    local jobInfo = JOBS_BY_ID[targetJobId]
+
+    if jobInfo then
+        local levelOk = CurrentDetectedLevel >= jobInfo.level
+        local energyOk = CurrentEnergy >= jobInfo.energy
+
+        if levelOk and energyOk then
+            pcall(function()
+                DoJobRemote:InvokeServer(JOB_HASH, targetJobId)
+            end)
+        end
+    end
+end)
+
 -- =========================================================
--- AUTO OPERATIONS SYSTEM (DI TAB TERPISAH: "Operations")
---
--- ALUR PER SLOT (SESUAI PERMINTAAN):
--- 1. Toggle Enable -> Coba COLLECT dulu (jaga-jaga ada reward nyangkut)
--- 2. START operation yang dipilih
--- 3. TUNGGU PERSIS sesuai durasi dari data (misal 600 detik)
--- 4. COLLECT lagi setelah durasi habis
--- 5. Ulangi dari langkah 2 (looping) selama toggle masih ON
---
--- Slot yang melebihi Max Active Slots otomatis OFF.
+-- AUTO OPERATIONS SYSTEM (TAB TERPISAH: "Operations")
+-- Coroutine per slot (durasi lama, gak perlu Scheduler heartbeat)
+-- Wait chunk dinaikkan ke 10s biar jarang "bangun" -> hemat CPU
 -- =========================================================
 local StartOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("StartOperation")
 local CollectOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("CollectOperation")
@@ -342,8 +446,8 @@ local MaxOperationSlots = 1
 local OperationSlotState = {}
 for i = 1, 4 do
     OperationSlotState[i] = {
-        AutoEnabled = false,   -- status toggle user
-        Running = false,       -- apakah coroutine loop sedang jalan (cegah dobel spawn)
+        AutoEnabled = false,
+        Running = false,
         OpId = OPERATIONS[1].id,
         ToggleRef = nil,
     }
@@ -380,13 +484,12 @@ OperationsTab:CreateDropdown({
         local num = tonumber(Selected) or 1
         MaxOperationSlots = num
 
-        -- Matikan slot yang melebihi limit baru (visual & logic)
         for i = 1, 4 do
             if i > MaxOperationSlots and OperationSlotState[i].AutoEnabled then
                 OperationSlotState[i].AutoEnabled = false
                 ForceSetToggleOff(OperationSlotState[i].ToggleRef, "AutoOperationSlot" .. i .. "Toggle")
 
-                LunoLibrary:Notify({
+                QueueNotify({
                     Title = "Slot " .. i .. " OFF",
                     Content = "Slot ini melebihi Max Active Slots (" .. MaxOperationSlots .. "). Auto dimatikan otomatis.",
                     Duration = 3
@@ -396,50 +499,45 @@ OperationsTab:CreateDropdown({
     end
 })
 
--- Fungsi utama loop per slot: Collect -> Start -> Wait Durasi -> Ulangi
 local function RunOperationSlotLoop(slotIndex)
     local slot = OperationSlotState[slotIndex]
 
     while slot.AutoEnabled do
-        -- STEP 1: Coba collect dulu (jaga-jaga ada reward nyangkut dari sebelumnya)
         local collectSuccess, collectResult = TryCollectOperation(slotIndex)
         if collectSuccess then
-            LunoLibrary:Notify({
+            QueueNotify({
                 Title = "Operation Collected!",
                 Content = "Slot " .. slotIndex .. " reward diklaim.\nCash: " .. tostring(collectResult.cash) .. " | XP: " .. tostring(collectResult.xp),
-                Duration = 4
+                Duration = 3
             })
         end
 
         if not slot.AutoEnabled then break end
 
-        -- STEP 2: Start operation baru
         local opInfo = OPERATIONS_BY_ID[slot.OpId]
 
         if not opInfo then
-            task.wait(5)
+            task.wait(10)
         else
-            local startSuccess, startResult = TryStartOperation(slot.OpId)
+            local startSuccess = TryStartOperation(slot.OpId)
 
             if startSuccess then
-                LunoLibrary:Notify({
+                QueueNotify({
                     Title = "Operation Started",
                     Content = "Slot " .. slotIndex .. ": " .. opInfo.name .. " (" .. FormatDuration(opInfo.duration) .. ")",
                     Duration = 3
                 })
 
-                -- STEP 3: Tunggu PERSIS sesuai durasi data (dipecah per 5 detik biar responsif kalau di-OFF di tengah jalan)
+                -- Wait chunk dinaikkan ke 10 detik (dari 5) biar coroutine jarang "bangun" -> hemat CPU
+                -- Tetap responsif kalau di-OFF di tengah jalan (maks delay 10 detik)
                 local waited = 0
                 while waited < opInfo.duration and slot.AutoEnabled do
-                    local chunk = math.min(5, opInfo.duration - waited)
+                    local chunk = math.min(10, opInfo.duration - waited)
                     task.wait(chunk)
                     waited = waited + chunk
                 end
-
-                -- Loop kembali ke atas -> Collect lagi (STEP 4) kalau masih enabled
             else
-                -- Gagal start (cash/level kurang, atau slot server masih dipakai job lain), tunggu retry
-                task.wait(5)
+                task.wait(10)
             end
         end
     end
@@ -469,9 +567,8 @@ for slotIndex = 1, 4 do
         Callback = function(Value)
             local slot = OperationSlotState[slotIndex]
 
-            -- Kalau slot ini melebihi Max Active Slots, paksa OFF & kasih tau
             if Value and slotIndex > MaxOperationSlots then
-                LunoLibrary:Notify({
+                QueueNotify({
                     Title = "Slot " .. slotIndex .. " OFF",
                     Content = "Slot ini melebihi Max Active Slots (" .. MaxOperationSlots .. "). Naikkan limit dulu di dropdown atas.",
                     Duration = 4
@@ -485,13 +582,12 @@ for slotIndex = 1, 4 do
 
             if Value then
                 local opInfo = OPERATIONS_BY_ID[slot.OpId]
-                LunoLibrary:Notify({
+                QueueNotify({
                     Title = "Auto Slot " .. slotIndex .. " Started",
-                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih") .. "\nMengecek reward tertunda dulu...",
+                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih"),
                     Duration = 3
                 })
 
-                -- Spawn coroutine loop kalau belum jalan (cegah dobel spawn)
                 if not slot.Running then
                     slot.Running = true
                     task.spawn(function()
@@ -553,7 +649,7 @@ AutoClaimToggleRef = MainTab:CreateToggle({
     Callback = function(Value)
         AutoClaimEnabled = Value
         if Value then
-            LunoLibrary:Notify({
+            QueueNotify({
                 Title = "Auto Claim Started",
                 Content = "Sedang mengecek Daily Playtime Reward 1-5...",
                 Duration = 3
@@ -576,10 +672,10 @@ MainTab:CreateButton({
             end
         end
 
-        LunoLibrary:Notify({
+        QueueNotify({
             Title = "Claim Selesai",
             Content = "Berhasil claim " .. claimedCount .. " reward baru.",
-            Duration = 4
+            Duration = 3
         })
 
         if IsAllRewardsClaimed() then
@@ -589,38 +685,32 @@ MainTab:CreateButton({
     end
 })
 
-task.spawn(function()
-    while true do
-        task.wait(1.5)
+Scheduler:Add("DailyReward", 1.7, function()
+    if not AutoClaimEnabled or IsAllRewardsClaimed() then return end
 
-        if AutoClaimEnabled and not IsAllRewardsClaimed() then
-            for i = 1, 5 do
-                if not ClaimedStatus[i] then
-                    local success, result = TryClaimReward(i)
-
-                    if success then
-                        LunoLibrary:Notify({
-                            Title = "Daily Reward Claimed!",
-                            Content = "Berhasil claim reward Day " .. i .. ".",
-                            Duration = 3
-                        })
-                    end
-
-                    task.wait(0.5)
-                end
-            end
-
-            if IsAllRewardsClaimed() then
-                AutoClaimEnabled = false
-                ForceSetToggleOff(AutoClaimToggleRef, "AutoClaimLadderToggle")
-
-                LunoLibrary:Notify({
-                    Title = "All Daily Rewards Claimed",
-                    Content = "Semua reward 1-5 sudah diklaim. Auto Claim dimatikan otomatis.",
-                    Duration = 5
+    for i = 1, 5 do
+        if not ClaimedStatus[i] then
+            local success = TryClaimReward(i)
+            if success then
+                QueueNotify({
+                    Title = "Daily Reward Claimed!",
+                    Content = "Berhasil claim reward Day " .. i .. ".",
+                    Duration = 2.5
                 })
             end
+            task.wait(0.3)
         end
+    end
+
+    if IsAllRewardsClaimed() then
+        AutoClaimEnabled = false
+        ForceSetToggleOff(AutoClaimToggleRef, "AutoClaimLadderToggle")
+
+        QueueNotify({
+            Title = "All Daily Rewards Claimed",
+            Content = "Semua reward 1-5 sudah diklaim. Auto Claim dimatikan otomatis.",
+            Duration = 4
+        })
     end
 end)
 
@@ -705,7 +795,7 @@ AutoClaimDailyTaskToggleRef = MainTab:CreateToggle({
     Callback = function(Value)
         AutoClaimDailyTaskEnabled = Value
         if Value then
-            LunoLibrary:Notify({
+            QueueNotify({
                 Title = "Auto Claim Daily Task Started",
                 Content = "Sedang mengecek Daily Task 1-6...",
                 Duration = 3
@@ -728,10 +818,10 @@ MainTab:CreateButton({
             end
         end
 
-        LunoLibrary:Notify({
+        QueueNotify({
             Title = "Claim Daily Task Selesai",
             Content = "Berhasil claim " .. claimedCount .. " task baru.",
-            Duration = 4
+            Duration = 3
         })
 
         if IsAllDailyTaskClaimed() then
@@ -750,7 +840,7 @@ AutoClaimWeeklyTaskToggleRef = MainTab:CreateToggle({
     Callback = function(Value)
         AutoClaimWeeklyTaskEnabled = Value
         if Value then
-            LunoLibrary:Notify({
+            QueueNotify({
                 Title = "Auto Claim Weekly Task Started",
                 Content = "Sedang mengecek Weekly Task 1-6...",
                 Duration = 3
@@ -773,10 +863,10 @@ MainTab:CreateButton({
             end
         end
 
-        LunoLibrary:Notify({
+        QueueNotify({
             Title = "Claim Weekly Task Selesai",
             Content = "Berhasil claim " .. claimedCount .. " task baru.",
-            Duration = 4
+            Duration = 3
         })
 
         if IsAllWeeklyTaskClaimed() then
@@ -786,73 +876,61 @@ MainTab:CreateButton({
     end
 })
 
-task.spawn(function()
-    while true do
-        task.wait(2)
+Scheduler:Add("DailyTask", 2.3, function()
+    if not AutoClaimDailyTaskEnabled or IsAllDailyTaskClaimed() then return end
 
-        if AutoClaimDailyTaskEnabled and not IsAllDailyTaskClaimed() then
-            for i = 1, 6 do
-                if not DailyTaskClaimedStatus[i] then
-                    local success, result = TryClaimDailyTask(i)
-
-                    if success then
-                        LunoLibrary:Notify({
-                            Title = "Daily Task Claimed!",
-                            Content = "Berhasil claim Daily Task #" .. i .. ".",
-                            Duration = 3
-                        })
-                    end
-
-                    task.wait(0.5)
-                end
-            end
-
-            if IsAllDailyTaskClaimed() then
-                AutoClaimDailyTaskEnabled = false
-                ForceSetToggleOff(AutoClaimDailyTaskToggleRef, "AutoClaimDailyTaskToggle")
-
-                LunoLibrary:Notify({
-                    Title = "All Daily Task Claimed",
-                    Content = "Semua Daily Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis.",
-                    Duration = 5
+    for i = 1, 6 do
+        if not DailyTaskClaimedStatus[i] then
+            local success = TryClaimDailyTask(i)
+            if success then
+                QueueNotify({
+                    Title = "Daily Task Claimed!",
+                    Content = "Berhasil claim Daily Task #" .. i .. ".",
+                    Duration = 2.5
                 })
             end
+            task.wait(0.3)
         end
+    end
+
+    if IsAllDailyTaskClaimed() then
+        AutoClaimDailyTaskEnabled = false
+        ForceSetToggleOff(AutoClaimDailyTaskToggleRef, "AutoClaimDailyTaskToggle")
+
+        QueueNotify({
+            Title = "All Daily Task Claimed",
+            Content = "Semua Daily Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis.",
+            Duration = 4
+        })
     end
 end)
 
-task.spawn(function()
-    while true do
-        task.wait(2)
+Scheduler:Add("WeeklyTask", 2.9, function()
+    if not AutoClaimWeeklyTaskEnabled or IsAllWeeklyTaskClaimed() then return end
 
-        if AutoClaimWeeklyTaskEnabled and not IsAllWeeklyTaskClaimed() then
-            for i = 1, 6 do
-                if not WeeklyTaskClaimedStatus[i] then
-                    local success, result = TryClaimWeeklyTask(i)
-
-                    if success then
-                        LunoLibrary:Notify({
-                            Title = "Weekly Task Claimed!",
-                            Content = "Berhasil claim Weekly Task #" .. i .. ".",
-                            Duration = 3
-                        })
-                    end
-
-                    task.wait(0.5)
-                end
-            end
-
-            if IsAllWeeklyTaskClaimed() then
-                AutoClaimWeeklyTaskEnabled = false
-                ForceSetToggleOff(AutoClaimWeeklyTaskToggleRef, "AutoClaimWeeklyTaskToggle")
-
-                LunoLibrary:Notify({
-                    Title = "All Weekly Task Claimed",
-                    Content = "Semua Weekly Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis.",
-                    Duration = 5
+    for i = 1, 6 do
+        if not WeeklyTaskClaimedStatus[i] then
+            local success = TryClaimWeeklyTask(i)
+            if success then
+                QueueNotify({
+                    Title = "Weekly Task Claimed!",
+                    Content = "Berhasil claim Weekly Task #" .. i .. ".",
+                    Duration = 2.5
                 })
             end
+            task.wait(0.3)
         end
+    end
+
+    if IsAllWeeklyTaskClaimed() then
+        AutoClaimWeeklyTaskEnabled = false
+        ForceSetToggleOff(AutoClaimWeeklyTaskToggleRef, "AutoClaimWeeklyTaskToggle")
+
+        QueueNotify({
+            Title = "All Weekly Task Claimed",
+            Content = "Semua Weekly Task 1-6 sudah diklaim. Auto Claim dimatikan otomatis.",
+            Duration = 4
+        })
     end
 end)
 
@@ -914,7 +992,7 @@ AutoAllocateToggleRef = MainTab:CreateToggle({
     Callback = function(Value)
         AutoAllocateEnabled = Value
         if Value then
-            LunoLibrary:Notify({
+            QueueNotify({
                 Title = "Auto Allocate Started",
                 Content = "Sedang alokasi poin ke: " .. SelectedStatKey,
                 Duration = 3
@@ -929,80 +1007,42 @@ MainTab:CreateButton({
         local success, result = TryAllocatePoint(SelectedStatKey)
 
         if success then
-            LunoLibrary:Notify({
+            QueueNotify({
                 Title = "Point Allocated",
                 Content = "Berhasil alokasi 1 poin ke: " .. SelectedStatKey,
                 Duration = 3
             })
         else
             local msg = (result and result.msg) or "Gagal alokasi poin (mungkin poin habis)."
-            LunoLibrary:Notify({
+            QueueNotify({
                 Title = "Allocate Failed",
                 Content = msg,
-                Duration = 4
+                Duration = 3
             })
         end
     end
 })
 
-task.spawn(function()
-    while true do
-        task.wait(1)
+Scheduler:Add("AutoAllocate", 1.3, function()
+    if not AutoAllocateEnabled then return end
 
-        if AutoAllocateEnabled then
-            local success, result = TryAllocatePoint(SelectedStatKey)
+    local success, result = TryAllocatePoint(SelectedStatKey)
 
-            if success then
-                LunoLibrary:Notify({
-                    Title = "Point Allocated!",
-                    Content = "Berhasil alokasi 1 poin ke: " .. SelectedStatKey,
-                    Duration = 2
-                })
-            else
-                AutoAllocateEnabled = false
-                ForceSetToggleOff(AutoAllocateToggleRef, "AutoAllocateToggle")
+    if success then
+        QueueNotify({
+            Title = "Point Allocated!",
+            Content = "Berhasil alokasi 1 poin ke: " .. SelectedStatKey,
+            Duration = 2
+        })
+    else
+        AutoAllocateEnabled = false
+        ForceSetToggleOff(AutoAllocateToggleRef, "AutoAllocateToggle")
 
-                local msg = (result and result.msg) or "Poin sudah habis atau terjadi error."
-                LunoLibrary:Notify({
-                    Title = "Auto Allocate Stopped",
-                    Content = "Auto Allocate dimatikan otomatis.\nAlasan: " .. msg,
-                    Duration = 5
-                })
-            end
-        end
-    end
-end)
-
--- =========================================================
--- MAIN AUTO JOB LOOP
--- =========================================================
-local AUTO_JOB_CHECK_INTERVAL = 1
-
-task.spawn(function()
-    while true do
-        task.wait(AUTO_JOB_CHECK_INTERVAL)
-
-        if AutoJobEnabled then
-            local targetJobId
-
-            if AutoHighestMode then
-                targetJobId = GetHighestUnlockedJob()
-            else
-                targetJobId = SelectedJobId
-            end
-
-            local jobInfo = JOBS_BY_ID[targetJobId]
-
-            if jobInfo then
-                local levelOk = CurrentDetectedLevel >= jobInfo.level
-                local energyOk = CurrentEnergy >= jobInfo.energy
-
-                if levelOk and energyOk then
-                    pcall(function()
-                        DoJobRemote:InvokeServer(JOB_HASH, targetJobId)
-                    end)
-                end
-            end
-        end
+        local msg = (result and result.msg) or "Poin sudah habis atau terjadi error."
+        QueueNotify({
+            Title = "Auto Allocate Stopped",
+            Content = "Auto Allocate dimatikan otomatis.\nAlasan: " .. msg,
+            Duration = 4
+        })
     end
 end)
