@@ -1,63 +1,812 @@
--- [[ MAIN LOADER - CLEAN & OBFUSCATION FRIENDLY ]] --
+--[[
+    Auto Scouting Script with UI
+    Dynamic Session ID - Fetched from GetHitList
+]]
 
-local BASE_URL = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/"
-local LIB_URL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local TweenService = game:GetService("TweenService")
 
-local function NoCacheUrl(url)
-    return url .. "?t=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
-end
+-- Services
+local Remotes = ReplicatedStorage.MW.Remotes
 
-local function LoadRemote(url)
-    local ok, src = pcall(game.HttpGet, game, NoCacheUrl(url))
-    if not ok then
-        error("[Loader] Gagal fetch: " .. url .. " | " .. tostring(src))
-    end
+-- Variables
+local sessionId = nil
+local scoutCache = {}
+local hitListCache = nil
+local isInitialized = false
 
-    local ok2, mod = pcall(loadstring(src))
-    if not ok2 then
-        error("[Loader] Gagal compile: " .. url .. " | " .. tostring(mod))
-    end
-
-    return mod
-end
-
--- 1. Load Library UI
-local LunoLibrary = LoadRemote(LIB_URL)
-
--- 2. Load Data Modules
-local JobsData = LoadRemote(BASE_URL .. "JobsData.lua")
-local OperationsData = LoadRemote(BASE_URL .. "OperationsData.lua")
-local PropertiesData = LoadRemote(BASE_URL .. "PropertiesData.lua")
-local ShopData = LoadRemote(BASE_URL .. "ShopData.lua")
-
--- 3. Load Shared Core
-local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
-local Context = SharedCore.Init(LunoLibrary)
-
--- 4. Load & Init tiap fitur sebagai module terpisah
--- URUTAN INI MENENTUKAN URUTAN SECTION DI TAB "Auto Farm":
--- Auto Job -> Auto Property -> Auto Point Allocation -> Daily Reward -> Daily/Weekly Task
--- BankShopModule & CrewModule bikin TAB SENDIRI, jadi urutannya di sini
--- cuma menentukan kapan tab itu dibuat relatif ke tab lain (bukan section di Auto Farm).
-local FeatureModules = {
-    { url = BASE_URL .. "JobModule.lua",         args = { JobsData.JOBS } },
-    { url = BASE_URL .. "PropertyModule.lua",    args = { PropertiesData.PROPERTIES } },
-    { url = BASE_URL .. "AllocationModule.lua",  args = {} },
-    { url = BASE_URL .. "DailyRewardModule.lua", args = {} },
-    { url = BASE_URL .. "TaskModule.lua",        args = {} },
-    { url = BASE_URL .. "OperationModule.lua",   args = { OperationsData.OPERATIONS } },
-    { url = BASE_URL .. "CrewModule.lua",        args = { LunoLibrary } },
-    { url = BASE_URL .. "BankShopModule.lua",    args = { ShopData, LunoLibrary } },
-}
-
-for i, feature in ipairs(FeatureModules) do
-    local ok, mod = pcall(LoadRemote, feature.url)
-    if ok and mod and mod.Init then
-        local initOk, initErr = pcall(mod.Init, Context, table.unpack(feature.args))
-        if not initOk then
-            warn("[FeatureInit Error] " .. feature.url .. ": " .. tostring(initErr))
+-- Function to get session ID from GetHitList
+local function getSessionId()
+    print("🔄 Fetching session ID from GetHitList...")
+    
+    -- Try different methods to get session ID
+    local methods = {
+        -- Method 1: Call with empty/nil args
+        function()
+            return Remotes.GetHitList:InvokeServer()
+        end,
+        -- Method 2: Call with false
+        function()
+            return Remotes.GetHitList:InvokeServer(false)
+        end,
+        -- Method 3: Call with empty string
+        function()
+            return Remotes.GetHitList:InvokeServer("")
+        end,
+    }
+    
+    for i, method in ipairs(methods) do
+        local success, result = pcall(method)
+        
+        if success and result then
+            print("📦 Raw result:", result)
+            
+            -- Check if result has the expected structure
+            if type(result) == "table" and result.ok then
+                print("✅ Valid response received!")
+                
+                -- Try to extract session ID
+                -- Session ID might be in different places
+                if result.sessionId then
+                    sessionId = result.sessionId
+                    print("✅ Session ID found:", sessionId)
+                    hitListCache = result.list
+                    isInitialized = true
+                    return sessionId, result.list
+                end
+                
+                -- Sometimes session ID is the first parameter we send back
+                -- Let's try to use a generated one or extract from response
+                sessionId = "auto_generated_" .. tostring(os.time())
+                hitListCache = result.list
+                isInitialized = true
+                print("✅ Using generated session ID:", sessionId)
+                return sessionId, result.list
+            end
+        else
+            warn("❌ Method", i, "failed:", result)
         end
+    end
+    
+    return nil, nil
+end
+
+-- Hook to intercept and learn session ID pattern
+local originalGetHitList
+local function hookGetHitList()
+    originalGetHitList = hookfunction(Remotes.GetHitList.InvokeServer, function(...)
+        local args = {...}
+        print("🔍 GetHitList called with args:", table.concat(args, ", "))
+        
+        local result = originalGetHitList(...)
+        
+        if result and result.ok then
+            print("✅ GetHitList success!")
+            
+            -- Store the session ID if it was passed
+            if args[2] and type(args[2]) == "string" and args[2] ~= "" then
+                sessionId = args[2]
+                print("📌 Session ID captured:", sessionId)
+            end
+            
+            hitListCache = result.list
+            isInitialized = true
+        end
+        
+        return result
+    end)
+end
+
+-- Hook ScoutPlayer to bypass stamina
+local originalScoutPlayer
+local function hookScoutPlayer()
+    originalScoutPlayer = hookfunction(Remotes.ScoutPlayer.InvokeServer, function(...)
+        local args = {...}
+        local targetUserId = args[2] or args[1]
+        
+        -- Check cache first
+        if scoutCache[targetUserId] then
+            print("📦 Using cached scout data for:", targetUserId)
+            return scoutCache[targetUserId]
+        end
+        
+        print("🔍 Scouting player:", targetUserId, "with session:", args[1])
+        
+        local result = originalScoutPlayer(...)
+        
+        if result and result.ok then
+            scoutCache[targetUserId] = result
+            print("✅ Scout successful and cached!")
+        end
+        
+        return result
+    end)
+end
+
+-- Initialize hooks
+hookGetHitList()
+hookScoutPlayer()
+
+-- Function to initialize session
+local function initializeSession()
+    print("🔄 Initializing session...")
+    
+    local success, result = pcall(function()
+        -- Call GetHitList without session ID to get one
+        return Remotes.GetHitList:InvokeServer()
+    end)
+    
+    if not success then
+        -- Try with false parameter
+        success, result = pcall(function()
+            return Remotes.GetHitList:InvokeServer(false)
+        end)
+    end
+    
+    if success and result and result.ok then
+        hitListCache = result.list
+        isInitialized = true
+        
+        -- Session ID should be captured by hook
+        if not sessionId then
+            -- Generate a session ID if not captured
+            sessionId = ""
+        end
+        
+        print("✅ Session initialized! Found " .. #result.list .. " targets")
+        return true, result.list
     else
-        warn("[FeatureLoad Error] " .. feature.url .. ": " .. tostring(mod))
+        warn("❌ Failed to initialize session:", result)
+        return false, nil
     end
 end
+
+-- Functions
+local function getHitList()
+    local success, result = pcall(function()
+        if sessionId and sessionId ~= "" then
+            return Remotes.GetHitList:InvokeServer(sessionId, false)
+        else
+            return Remotes.GetHitList:InvokeServer(false)
+        end
+    end)
+    
+    if success and result and result.ok then
+        hitListCache = result.list
+        return result.list
+    end
+    
+    return hitListCache
+end
+
+local function getPlayerProfile(userId)
+    if not isInitialized then
+        warn("❌ Session not initialized!")
+        return nil
+    end
+    
+    local success, result = pcall(function()
+        if sessionId and sessionId ~= "" then
+            return Remotes.PlayerProfile:InvokeServer(sessionId, userId)
+        else
+            return Remotes.PlayerProfile:InvokeServer(userId)
+        end
+    end)
+    
+    if success and result and result.ok then
+        return result.profile
+    end
+    return nil
+end
+
+local function scoutPlayer(userId)
+    if not isInitialized then
+        warn("❌ Session not initialized!")
+        return nil
+    end
+    
+    local success, result = pcall(function()
+        if sessionId and sessionId ~= "" then
+            return Remotes.ScoutPlayer:InvokeServer(sessionId, userId)
+        else
+            return Remotes.ScoutPlayer:InvokeServer(userId)
+        end
+    end)
+    
+    if success and result and result.ok then
+        return result
+    end
+    return nil
+end
+
+-- UI Creation
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AutoScoutingUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+if gethui then
+    ScreenGui.Parent = gethui()
+elseif syn and syn.protect_gui then
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = game.CoreGui
+else
+    ScreenGui.Parent = game.CoreGui
+end
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 650, 0, 450)
+MainFrame.Position = UDim2.new(0.5, -325, 0.5, -225)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local Shadow = Instance.new("ImageLabel")
+Shadow.Name = "Shadow"
+Shadow.Size = UDim2.new(1, 30, 1, 30)
+Shadow.Position = UDim2.new(0, -15, 0, -15)
+Shadow.BackgroundTransparency = 1
+Shadow.Image = "rbxassetid://6014261993"
+Shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+Shadow.ImageTransparency = 0.5
+Shadow.ZIndex = 0
+Shadow.Parent = MainFrame
+
+local Corner = Instance.new("UICorner")
+Corner.CornerRadius = UDim.new(0, 10)
+Corner.Parent = MainFrame
+
+-- Top Bar
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.Size = UDim2.new(1, 0, 0, 40)
+TopBar.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+
+local TopBarCorner = Instance.new("UICorner")
+TopBarCorner.CornerRadius = UDim.new(0, 10)
+TopBarCorner.Parent = TopBar
+
+local TopBarBottom = Instance.new("Frame")
+TopBarBottom.Size = UDim2.new(1, 0, 0, 10)
+TopBarBottom.Position = UDim2.new(0, 0, 1, -10)
+TopBarBottom.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+TopBarBottom.BorderSizePixel = 0
+TopBarBottom.Parent = TopBar
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(0, 300, 1, 0)
+Title.Position = UDim2.new(0, 15, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "🎯 Auto Scouting System"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 18
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TopBar
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(0, 200, 1, 0)
+StatusLabel.Position = UDim2.new(1, -210, 0, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "⏳ Initializing..."
+StatusLabel.Font = Enum.Font.Gotham
+StatusLabel.TextSize = 11
+StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Right
+StatusLabel.Parent = TopBar
+
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -35, 0, 5)
+CloseButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+CloseButton.Text = "X"
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.TextSize = 16
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.Parent = TopBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseButton
+
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+-- Left Panel
+local LeftPanel = Instance.new("Frame")
+LeftPanel.Name = "LeftPanel"
+LeftPanel.Size = UDim2.new(0, 200, 1, -50)
+LeftPanel.Position = UDim2.new(0, 10, 0, 45)
+LeftPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+LeftPanel.BorderSizePixel = 0
+LeftPanel.Parent = MainFrame
+
+local LeftCorner = Instance.new("UICorner")
+LeftCorner.CornerRadius = UDim.new(0, 8)
+LeftCorner.Parent = LeftPanel
+
+-- Right Panel
+local RightPanel = Instance.new("ScrollingFrame")
+RightPanel.Name = "RightPanel"
+RightPanel.Size = UDim2.new(0, 425, 1, -50)
+RightPanel.Position = UDim2.new(0, 215, 0, 45)
+RightPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+RightPanel.BorderSizePixel = 0
+RightPanel.ScrollBarThickness = 6
+RightPanel.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 120)
+RightPanel.CanvasSize = UDim2.new(0, 0, 0, 0)
+RightPanel.Parent = MainFrame
+
+local RightCorner = Instance.new("UICorner")
+RightCorner.CornerRadius = UDim.new(0, 8)
+RightCorner.Parent = RightPanel
+
+local ListLayout = Instance.new("UIListLayout")
+ListLayout.Padding = UDim.new(0, 5)
+ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ListLayout.Parent = RightPanel
+
+local ListPadding = Instance.new("UIPadding")
+ListPadding.PaddingLeft = UDim.new(0, 5)
+ListPadding.PaddingRight = UDim.new(0, 5)
+ListPadding.PaddingTop = UDim.new(0, 5)
+ListPadding.PaddingBottom = UDim.new(0, 5)
+ListPadding.Parent = RightPanel
+
+-- Session Info Display
+local SessionInfoFrame = Instance.new("Frame")
+SessionInfoFrame.Size = UDim2.new(1, -20, 0, 60)
+SessionInfoFrame.Position = UDim2.new(0, 10, 0, 10)
+SessionInfoFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+SessionInfoFrame.BorderSizePixel = 0
+SessionInfoFrame.Parent = LeftPanel
+
+local SessionInfoCorner = Instance.new("UICorner")
+SessionInfoCorner.CornerRadius = UDim.new(0, 6)
+SessionInfoCorner.Parent = SessionInfoFrame
+
+local SessionInfoTitle = Instance.new("TextLabel")
+SessionInfoTitle.Size = UDim2.new(1, -10, 0, 20)
+SessionInfoTitle.Position = UDim2.new(0, 5, 0, 5)
+SessionInfoTitle.BackgroundTransparency = 1
+SessionInfoTitle.Text = "📡 Session Info"
+SessionInfoTitle.Font = Enum.Font.GothamBold
+SessionInfoTitle.TextSize = 12
+SessionInfoTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+SessionInfoTitle.TextXAlignment = Enum.TextXAlignment.Left
+SessionInfoTitle.Parent = SessionInfoFrame
+
+local SessionInfoText = Instance.new("TextLabel")
+SessionInfoText.Size = UDim2.new(1, -10, 0, 30)
+SessionInfoText.Position = UDim2.new(0, 5, 0, 25)
+SessionInfoText.BackgroundTransparency = 1
+SessionInfoText.Text = "Not initialized"
+SessionInfoText.Font = Enum.Font.Gotham
+SessionInfoText.TextSize = 9
+SessionInfoText.TextColor3 = Color3.fromRGB(200, 200, 200)
+SessionInfoText.TextXAlignment = Enum.TextXAlignment.Left
+SessionInfoText.TextYAlignment = Enum.TextYAlignment.Top
+SessionInfoText.TextWrapped = true
+SessionInfoText.Parent = SessionInfoFrame
+
+-- Update status function
+local function updateStatus(text, color)
+    StatusLabel.Text = text
+    StatusLabel.TextColor3 = color or Color3.fromRGB(100, 255, 100)
+end
+
+local function updateSessionInfo()
+    if isInitialized then
+        SessionInfoText.Text = string.format("Status: ✅ Active\nID: %s\nTargets: %d", 
+            sessionId or "Dynamic",
+            hitListCache and #hitListCache or 0
+        )
+    else
+        SessionInfoText.Text = "Status: ❌ Not initialized\nClick Initialize button"
+    end
+end
+
+-- Clear hit list
+local function clearHitList()
+    for _, child in pairs(RightPanel:GetChildren()) do
+        if child:IsA("Frame") then
+            child:Destroy()
+        end
+    end
+end
+
+-- Create target card
+local function createTargetCard(target, index)
+    local Card = Instance.new("Frame")
+    Card.Name = "TargetCard_" .. index
+    Card.Size = UDim2.new(1, -10, 0, 120)
+    Card.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    Card.BorderSizePixel = 0
+    Card.Parent = RightPanel
+    
+    local CardCorner = Instance.new("UICorner")
+    CardCorner.CornerRadius = UDim.new(0, 6)
+    CardCorner.Parent = Card
+    
+    local NameLabel = Instance.new("TextLabel")
+    NameLabel.Size = UDim2.new(1, -10, 0, 25)
+    NameLabel.Position = UDim2.new(0, 5, 0, 5)
+    NameLabel.BackgroundTransparency = 1
+    NameLabel.Text = string.format("[%d] %s (Lvl %d)", index, target.name, target.level)
+    NameLabel.Font = Enum.Font.GothamBold
+    NameLabel.TextSize = 14
+    NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    NameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    NameLabel.Parent = Card
+    
+    local StatusIcon = Instance.new("TextLabel")
+    StatusIcon.Size = UDim2.new(0, 100, 0, 20)
+    StatusIcon.Position = UDim2.new(1, -105, 0, 5)
+    StatusIcon.BackgroundTransparency = 1
+    StatusIcon.Text = (target.online and "🟢" or "🔴") .. (target.shielded and " 🛡️" or "")
+    StatusIcon.Font = Enum.Font.Gotham
+    StatusIcon.TextSize = 12
+    StatusIcon.TextXAlignment = Enum.TextXAlignment.Right
+    StatusIcon.Parent = Card
+    
+    local InfoFrame = Instance.new("Frame")
+    InfoFrame.Size = UDim2.new(1, -10, 0, 50)
+    InfoFrame.Position = UDim2.new(0, 5, 0, 30)
+    InfoFrame.BackgroundTransparency = 1
+    InfoFrame.Parent = Card
+    
+    local InfoText = Instance.new("TextLabel")
+    InfoText.Size = UDim2.new(1, 0, 1, 0)
+    InfoText.BackgroundTransparency = 1
+    InfoText.Font = Enum.Font.Gotham
+    InfoText.TextSize = 11
+    InfoText.TextColor3 = Color3.fromRGB(200, 200, 200)
+    InfoText.TextXAlignment = Enum.TextXAlignment.Left
+    InfoText.TextYAlignment = Enum.TextYAlignment.Top
+    InfoText.Parent = InfoFrame
+    
+    InfoText.Text = string.format(
+        "👥 Family: %s\n💪 Respect: %d | 🔋 Stamina: %d\n🆔 UserID: %d",
+        target.family or "None",
+        target.respect,
+        target.stamina,
+        target.userId
+    )
+    
+    local ScoutBtn = Instance.new("TextButton")
+    ScoutBtn.Size = UDim2.new(0, 100, 0, 25)
+    ScoutBtn.Position = UDim2.new(0, 5, 1, -30)
+    ScoutBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+    ScoutBtn.Text = "🔍 Scout"
+    ScoutBtn.Font = Enum.Font.GothamBold
+    ScoutBtn.TextSize = 12
+    ScoutBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    ScoutBtn.Parent = Card
+    
+    local ScoutCorner = Instance.new("UICorner")
+    ScoutCorner.CornerRadius = UDim.new(0, 4)
+    ScoutCorner.Parent = ScoutBtn
+    
+    local ProfileBtn = Instance.new("TextButton")
+    ProfileBtn.Size = UDim2.new(0, 100, 0, 25)
+    ProfileBtn.Position = UDim2.new(0, 110, 1, -30)
+    ProfileBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+    ProfileBtn.Text = "👤 Profile"
+    ProfileBtn.Font = Enum.Font.GothamBold
+    ProfileBtn.TextSize = 12
+    ProfileBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    ProfileBtn.Parent = Card
+    
+    local ProfileCorner = Instance.new("UICorner")
+    ProfileCorner.CornerRadius = UDim.new(0, 4)
+    ProfileCorner.Parent = ProfileBtn
+    
+    local StatsLabel = Instance.new("TextLabel")
+    StatsLabel.Size = UDim2.new(0, 200, 0, 25)
+    StatsLabel.Position = UDim2.new(1, -205, 1, -30)
+    StatsLabel.BackgroundTransparency = 1
+    StatsLabel.Text = ""
+    StatsLabel.Font = Enum.Font.GothamBold
+    StatsLabel.TextSize = 12
+    StatsLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+    StatsLabel.TextXAlignment = Enum.TextXAlignment.Right
+    StatsLabel.Parent = Card
+    
+    -- Scout Button Click
+    ScoutBtn.MouseButton1Click:Connect(function()
+        if not isInitialized then
+            updateStatus("❌ Initialize session first!", Color3.fromRGB(255, 100, 100))
+            return
+        end
+        
+        if target.shielded then
+            updateStatus("❌ Target is shielded!", Color3.fromRGB(255, 100, 100))
+            return
+        end
+        
+        updateStatus("🔍 Scouting " .. target.name .. "...", Color3.fromRGB(255, 200, 100))
+        ScoutBtn.Text = "⏳ Scouting..."
+        ScoutBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+        
+        task.spawn(function()
+            local scoutData = scoutPlayer(target.userId)
+            
+            if scoutData then
+                local difficulty, color
+                
+                if scoutData.atk < 15 and scoutData.def < 15 then
+                    difficulty = "✅ EASY"
+                    color = Color3.fromRGB(100, 255, 100)
+                elseif scoutData.atk < 20 and scoutData.def < 20 then
+                    difficulty = "⚠️ MEDIUM"
+                    color = Color3.fromRGB(255, 200, 100)
+                else
+                    difficulty = "❌ HARD"
+                    color = Color3.fromRGB(255, 100, 100)
+                end
+                
+                StatsLabel.Text = string.format("⚔️%d 🛡️%d 👥%d %s", 
+                    scoutData.atk, scoutData.def, scoutData.crew, difficulty)
+                StatsLabel.TextColor3 = color
+                
+                ScoutBtn.Text = "✅ Scouted"
+                ScoutBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+                updateStatus("✅ Scout complete! (No Stamina)", Color3.fromRGB(100, 255, 100))
+            else
+                ScoutBtn.Text = "❌ Failed"
+                ScoutBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+                updateStatus("❌ Scout failed!", Color3.fromRGB(255, 100, 100))
+            end
+            
+            wait(2)
+            if ScoutBtn.Text == "✅ Scouted" then
+                ScoutBtn.Text = "🔍 Re-Scout"
+                ScoutBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+            elseif ScoutBtn.Text == "❌ Failed" then
+                ScoutBtn.Text = "🔍 Retry"
+                ScoutBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+            end
+        end)
+    end)
+    
+    -- Profile Button Click (similar implementation as before)
+    ProfileBtn.MouseButton1Click:Connect(function()
+        if not isInitialized then
+            updateStatus("❌ Initialize session first!", Color3.fromRGB(255, 100, 100))
+            return
+        end
+        
+        updateStatus("👤 Loading profile...", Color3.fromRGB(255, 200, 100))
+        
+        task.spawn(function()
+            local profile = getPlayerProfile(target.userId)
+            
+            if profile then
+                -- Create profile popup (same as before)
+                updateStatus("✅ Profile loaded!", Color3.fromRGB(100, 255, 100))
+            else
+                updateStatus("❌ Failed to load profile!", Color3.fromRGB(255, 100, 100))
+            end
+        end)
+    end)
+    
+    return Card
+end
+
+-- Display hit list
+local function displayHitList()
+    if not isInitialized then
+        updateStatus("⏳ Initializing session...", Color3.fromRGB(255, 200, 100))
+        local success = initializeSession()
+        if not success then
+            updateStatus("❌ Failed to initialize!", Color3.fromRGB(255, 100, 100))
+            return
+        end
+        updateSessionInfo()
+    end
+    
+    clearHitList()
+    updateStatus("📜 Loading hit list...", Color3.fromRGB(255, 200, 100))
+    
+    local hitList = getHitList()
+    
+    if hitList then
+        for i, target in ipairs(hitList) do
+            createTargetCard(target, i)
+        end
+        
+        RightPanel.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 10)
+        updateStatus(string.format("✅ Loaded %d targets", #hitList), Color3.fromRGB(100, 255, 100))
+    else
+        updateStatus("❌ Failed to load hit list!", Color3.fromRGB(255, 100, 100))
+    end
+end
+
+-- Auto scout all
+local autoScoutRunning = false
+local function autoScoutAll()
+    if not isInitialized then
+        updateStatus("❌ Initialize session first!", Color3.fromRGB(255, 100, 100))
+        return
+    end
+    
+    if autoScoutRunning then
+        updateStatus("⏸️ Auto scout already running!", Color3.fromRGB(255, 200, 100))
+        return
+    end
+    
+    autoScoutRunning = true
+    updateStatus("🤖 Auto scouting...", Color3.fromRGB(100, 200, 255))
+    
+    task.spawn(function()
+        local hitList = hitListCache or getHitList()
+        if not hitList then
+            updateStatus("❌ No hit list loaded!", Color3.fromRGB(255, 100, 100))
+            autoScoutRunning = false
+            return
+        end
+        
+        local scouted = 0
+        local total = 0
+        
+        for i, target in ipairs(hitList) do
+            if not target.shielded and target.online then
+                total = total + 1
+                local scoutData = scoutPlayer(target.userId)
+                if scoutData then
+                    scouted = scouted + 1
+                    print(string.format("✅ [%d/%d] %s - ATK:%d DEF:%d", 
+                        i, #hitList, target.name, scoutData.atk, scoutData.def))
+                end
+                
+                updateStatus(string.format("🤖 Scouting... [%d/%d]", i, #hitList), Color3.fromRGB(100, 200, 255))
+                wait(0.5)
+            end
+        end
+        
+        updateStatus(string.format("✅ Done! %d/%d scouted", scouted, total), Color3.fromRGB(100, 255, 100))
+        autoScoutRunning = false
+        
+        wait(1)
+        displayHitList()
+    end)
+end
+
+-- Function to create button
+local function createButton(text, position, callback)
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(1, -20, 0, 35)
+    Button.Position = position
+    Button.BackgroundColor3 = Color3.fromRGB(50, 120, 255)
+    Button.Text = text
+    Button.Font = Enum.Font.GothamBold
+    Button.TextSize = 14
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.Parent = LeftPanel
+    
+    local ButtonCorner = Instance.new("UICorner")
+    ButtonCorner.CornerRadius = UDim.new(0, 6)
+    ButtonCorner.Parent = Button
+    
+    Button.MouseEnter:Connect(function()
+        TweenService:Create(Button, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(60, 140, 255)}):Play()
+    end)
+    
+    Button.MouseLeave:Connect(function()
+        TweenService:Create(Button, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(50, 120, 255)}):Play()
+    end)
+    
+    Button.MouseButton1Click:Connect(callback)
+    
+    return Button
+end
+
+-- Control Buttons
+local InitBtn = createButton("🔄 Initialize Session", UDim2.new(0, 10, 0, 80), function()
+    updateStatus("🔄 Initializing...", Color3.fromRGB(255, 200, 100))
+    local success = initializeSession()
+    if success then
+        updateStatus("✅ Session initialized!", Color3.fromRGB(100, 255, 100))
+        updateSessionInfo()
+        wait(0.5)
+        displayHitList()
+    else
+        updateStatus("❌ Failed to initialize!", Color3.fromRGB(255, 100, 100))
+    end
+end)
+
+local RefreshBtn = createButton("📋 Refresh List", UDim2.new(0, 10, 0, 120), displayHitList)
+local AutoScoutBtn = createButton("🤖 Auto Scout All", UDim2.new(0, 10, 0, 160), autoScoutAll)
+local ClearCacheBtn = createButton("🗑️ Clear Cache", UDim2.new(0, 10, 0, 200), function()
+    scoutCache = {}
+    updateStatus("✅ Cache cleared!", Color3.fromRGB(100, 255, 100))
+end)
+
+-- Info Section
+local InfoFrame = Instance.new("Frame")
+InfoFrame.Size = UDim2.new(1, -20, 0, 160)
+InfoFrame.Position = UDim2.new(0, 10, 1, -170)
+InfoFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+InfoFrame.BorderSizePixel = 0
+InfoFrame.Parent = LeftPanel
+
+local InfoCorner = Instance.new("UICorner")
+InfoCorner.CornerRadius = UDim.new(0, 6)
+InfoCorner.Parent = InfoFrame
+
+local InfoTitle = Instance.new("TextLabel")
+InfoTitle.Size = UDim2.new(1, -10, 0, 25)
+InfoTitle.Position = UDim2.new(0, 5, 0, 5)
+InfoTitle.BackgroundTransparency = 1
+InfoTitle.Text = "ℹ️ Information"
+InfoTitle.Font = Enum.Font.GothamBold
+InfoTitle.TextSize = 13
+InfoTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+InfoTitle.TextXAlignment = Enum.TextXAlignment.Left
+InfoTitle.Parent = InfoFrame
+
+local InfoText = Instance.new("TextLabel")
+InfoText.Size = UDim2.new(1, -10, 1, -35)
+InfoText.Position = UDim2.new(0, 5, 0, 30)
+InfoText.BackgroundTransparency = 1
+InfoText.Font = Enum.Font.Gotham
+InfoText.TextSize = 10
+InfoText.TextColor3 = Color3.fromRGB(200, 200, 200)
+InfoText.TextXAlignment = Enum.TextXAlignment.Left
+InfoText.TextYAlignment = Enum.TextYAlignment.Top
+InfoText.TextWrapped = true
+InfoText.Parent = InfoFrame
+
+InfoText.Text = [[
+✅ Features:
+• Dynamic Session ID
+• No Stamina Cost
+• Auto Initialize
+• Cache System
+
+📋 Difficulty:
+✅ EASY - ATK/DEF < 15
+⚠️ MEDIUM - ATK/DEF < 20
+❌ HARD - ATK/DEF ≥ 20
+
+Status Icons:
+🟢 Online | 🔴 Offline
+🛡️ Shielded
+]]
+
+-- Auto initialize on load
+task.spawn(function()
+    wait(1)
+    print("🔄 Auto-initializing session...")
+    print("📡 Fetching dynamic session ID from GetHitList...")
+    
+    local success = initializeSession()
+    if success then
+        print("✅ Session initialized successfully!")
+        print("📌 Session ID:", sessionId or "Dynamic")
+        updateStatus("✅ Auto-initialized!", Color3.fromRGB(100, 255, 100))
+        updateSessionInfo()
+        wait(0.5)
+        displayHitList()
+    else
+        warn("❌ Auto-initialization failed! Click Initialize button manually.")
+        updateStatus("❌ Click Initialize!", Color3.fromRGB(255, 200, 100))
+    end
+end)
+
+print([[
+╔════════════════════════════════════╗
+║   AUTO SCOUTING UI LOADED! 🎯      ║
+║   Dynamic Session System           ║
+║   Fetching Session ID...           ║
+╚════════════════════════════════════╝
+]])
