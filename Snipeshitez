@@ -35,6 +35,14 @@ local ShopData = LoadRemote(BASE_URL .. "ShopData.lua") -- [NEW] data khusus Sho
 local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
 local Context = SharedCore.Init(LunoLibrary)
 
+-- Catatan penting:
+-- Setelah SharedCore.Init() memanggil LunoLibrary:CreateWindow(...),
+-- table "LunoLibrary" di scope ini SUDAH punya method :CreateTab() yang aktif,
+-- karena CreateWindow() mem-patch method baru ke table yang sama (upvalue closure).
+-- Jadi untuk bikin TAB BARU (bukan section di tab yang sudah ada),
+-- kita panggil LunoLibrary:CreateTab(...) langsung, TIDAK lewat Context.Window
+-- (karena Context.Window kemungkinan tidak ada / beda struktur tergantung SharedCore.lua).
+
 -- 4. Load & Init tiap fitur sebagai module terpisah
 -- URUTAN INI MENENTUKAN URUTAN SECTION DI TAB "Auto Farm":
 -- Auto Job -> Auto Property -> Auto Point Allocation -> Daily Reward -> Daily/Weekly Task
@@ -62,40 +70,41 @@ end
 
 --======================================================================
 -- [[ BANK & SHOP - INLINE (BELUM DIJADIKAN MODULE, UNTUK DEBUG DULU) ]] --
+-- FIX: Pakai LunoLibrary:CreateTab() langsung + field name sesuai library asli
 --======================================================================
 do
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local LocalPlayer = Players.LocalPlayer
 
-    local SHOP = ShopData.SHOP or {}
+    local SHOP = (ShopData and ShopData.SHOP) or {}
 
     print("[BankShop][Debug] Mulai inisialisasi Bank & Shop inline...")
+    print("[BankShop][Debug] Jumlah item SHOP terload: " .. #SHOP)
 
     -----------------------------------------------------------------
-    -- Ambil Window dari Context (SESUAIKAN sesuai isi SharedCore.lua)
+    -- Pastikan LunoLibrary:CreateTab tersedia (artinya CreateWindow sudah dipanggil)
     -----------------------------------------------------------------
-    local Window = Context.Window
-    if not Window or not Window.CreateTab then
-        warn("[BankShop][Debug] Context.Window tidak ditemukan / tidak punya CreateTab. Cek SharedCore.lua!")
+    if type(LunoLibrary.CreateTab) ~= "function" then
+        warn("[BankShop][Debug] LunoLibrary:CreateTab tidak ditemukan! Pastikan SharedCore.Init() sudah memanggil LunoLibrary:CreateWindow() sebelum baris ini.")
         return
     end
 
     local ok_tab, Tab = pcall(function()
-        return Window:CreateTab("Bank & Shop", 0)
+        return LunoLibrary:CreateTab("Bank & Shop") -- tanpa FixedOrder = otomatis nempel di urutan tab terakhir
     end)
 
-    if not ok_tab then
-        warn("[BankShop][Debug] Gagal buat Tab: " .. tostring(Tab))
+    if not ok_tab or not Tab then
+        warn("[BankShop][Debug] Gagal buat Tab 'Bank & Shop': " .. tostring(Tab))
         return
     end
     print("[BankShop][Debug] Tab 'Bank & Shop' berhasil dibuat.")
 
     local function Notify(title, content, duration)
         print(("[BankShop][Notify] %s: %s"):format(title, tostring(content)))
-        if Context.Notify then
-            pcall(Context.Notify, title, content, duration)
-        end
+        pcall(function()
+            LunoLibrary:Notify({ Title = title, Content = content, Duration = duration or 3 })
+        end)
     end
 
     -----------------------------------------------------------------
@@ -144,12 +153,11 @@ do
     -----------------------------------------------------------------
     -- SECTION: BANK
     -----------------------------------------------------------------
-    local BankSection = Tab:CreateSection("Auto Deposit Bank")
+    Tab:CreateSection("Auto Deposit Bank")
 
-    BankSection:CreateInput({
-        Name = "Character/Profile ID (isi manual jika auto-detect gagal)",
-        PlaceholderText = "contoh: ca01587a32b24eb1a0527e8e595e8483",
-        RemoveTextAfterFocusLost = false,
+    Tab:CreateInput({
+        Title = "Character/Profile ID (isi manual jika auto-detect gagal)",
+        Placeholder = "contoh: ca01587a32b24eb1a0527e8e595e8483",
         Callback = function(text)
             ManualCharId = text or ""
             print("[BankShop][Debug] ManualCharId diset ke: " .. ManualCharId)
@@ -157,10 +165,9 @@ do
     })
 
     local DepositAmount = 1000
-    BankSection:CreateInput({
-        Name = "Jumlah Deposit",
-        PlaceholderText = "1000",
-        RemoveTextAfterFocusLost = false,
+    Tab:CreateInput({
+        Title = "Jumlah Deposit",
+        Placeholder = "1000",
         Callback = function(text)
             local num = tonumber(text)
             if num and num > 0 then
@@ -173,18 +180,16 @@ do
     })
 
     local DepositDelay = 1.5 -- delay antar deposit (detik), jaga CPU/memory tetap stabil
-    BankSection:CreateInput({
-        Name = "Delay Antar Deposit (detik, min 0.2)",
-        PlaceholderText = "1.5",
-        RemoveTextAfterFocusLost = false,
-        Callback = function(text)
-            local num = tonumber(text)
-            if num and num >= 0.2 then
-                DepositDelay = num
-                print("[BankShop][Debug] DepositDelay diset ke: " .. DepositDelay)
-            else
-                Notify("Bank", "Delay minimal 0.2 detik", 3)
-            end
+    Tab:CreateSlider({
+        Title = "Delay Antar Deposit",
+        Min = 1,
+        Max = 50,
+        Default = 15, -- direpresentasikan x10 (15 = 1.5 detik) karena slider library ini integer only
+        Suffix = " (x0.1 detik)",
+        Flag = "BankDepositDelay",
+        Callback = function(val)
+            DepositDelay = val / 10
+            print("[BankShop][Debug] DepositDelay diset ke: " .. DepositDelay)
         end,
     })
 
@@ -211,15 +216,16 @@ do
             return true
         end
 
-        warn("[BankShop][Debug] Deposit gagal, response: " .. tostring(result))
+        warn("[BankShop][Debug] Deposit gagal, response: " .. tostring(result and result[1]))
         return false
     end
 
     local AutoDepositEnabled = false
 
-    BankSection:CreateToggle({
-        Name = "Auto Deposit (Loop Aman dengan Delay)",
-        CurrentValue = false,
+    Tab:CreateToggle({
+        Title = "Auto Deposit (Loop Aman dengan Delay)",
+        Default = false,
+        Flag = "AutoDepositEnabled",
         Callback = function(value)
             AutoDepositEnabled = value
             if not value then
@@ -240,8 +246,8 @@ do
         end,
     })
 
-    BankSection:CreateButton({
-        Name = "Deposit Sekali (untuk testing manual)",
+    Tab:CreateButton({
+        Title = "Deposit Sekali (untuk testing manual)",
         Callback = function()
             local success = DoDeposit()
             Notify("Bank", success and "Deposit berhasil" or "Deposit gagal", 3)
@@ -251,20 +257,22 @@ do
     -----------------------------------------------------------------
     -- SECTION: SHOP
     -----------------------------------------------------------------
-    local ShopSection = Tab:CreateSection("Auto Buy Shop")
+    Tab:CreateSection("Auto Buy Shop")
 
     local ItemOptions = {}
     for _, data in ipairs(SHOP) do
         table.insert(ItemOptions, data.item)
     end
+    if #ItemOptions == 0 then ItemOptions = {"No Items"} end
 
     local SelectedItems = {}
 
-    ShopSection:CreateDropdown({
-        Name = "Pilih Item untuk Auto Buy",
+    local ShopDropdown = Tab:CreateDropdown({
+        Title = "Pilih Item untuk Auto Buy",
         Options = ItemOptions,
-        MultipleOptions = true,
-        CurrentOption = {},
+        Multi = true,
+        Default = {},
+        Flag = "ShopSelectedItems",
         Callback = function(options)
             SelectedItems = options or {}
             print("[BankShop][Debug] SelectedItems: " .. table.concat(SelectedItems, ", "))
@@ -295,7 +303,7 @@ do
             return true
         end
 
-        warn(("[BankShop][Debug] Gagal beli %s, response: %s"):format(itemId, tostring(result)))
+        warn(("[BankShop][Debug] Gagal beli %s, response: %s"):format(itemId, tostring(result and result[1])))
         return false
     end
 
@@ -317,9 +325,10 @@ do
         end)
     end
 
-    ShopSection:CreateToggle({
-        Name = "Auto Buy saat Stock Baru",
-        CurrentValue = false,
+    Tab:CreateToggle({
+        Title = "Auto Buy saat Stock Baru",
+        Default = false,
+        Flag = "AutoBuyEnabled",
         Callback = function(value)
             AutoBuyEnabled = value
             if value then
@@ -331,8 +340,8 @@ do
         end,
     })
 
-    ShopSection:CreateButton({
-        Name = "Buy Sekali (untuk testing manual)",
+    Tab:CreateButton({
+        Title = "Buy Sekali (untuk testing manual)",
         Callback = function()
             TryBuySelected()
         end,
