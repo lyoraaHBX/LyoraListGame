@@ -1,6 +1,6 @@
 --[[
     Auto Scouting Script with UI
-    Dynamic Session ID - Fetched from GetHitList
+    Hook ScoutPlayer to prevent stamina cost
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,170 +11,75 @@ local TweenService = game:GetService("TweenService")
 -- Services
 local Remotes = ReplicatedStorage.MW.Remotes
 
--- Variables
-local sessionId = nil
+-- Cache
 local scoutCache = {}
 local hitListCache = nil
-local isInitialized = false
+local profileCache = {}
 
--- Function to get session ID from GetHitList
-local function getSessionId()
-    print("🔄 Fetching session ID from GetHitList...")
-    
-    -- Try different methods to get session ID
-    local methods = {
-        -- Method 1: Call with empty/nil args
-        function()
-            return Remotes.GetHitList:InvokeServer()
-        end,
-        -- Method 2: Call with false
-        function()
-            return Remotes.GetHitList:InvokeServer(false)
-        end,
-        -- Method 3: Call with empty string
-        function()
-            return Remotes.GetHitList:InvokeServer("")
-        end,
-    }
-    
-    for i, method in ipairs(methods) do
-        local success, result = pcall(method)
-        
-        if success and result then
-            print("📦 Raw result:", result)
-            
-            -- Check if result has the expected structure
-            if type(result) == "table" and result.ok then
-                print("✅ Valid response received!")
-                
-                -- Try to extract session ID
-                -- Session ID might be in different places
-                if result.sessionId then
-                    sessionId = result.sessionId
-                    print("✅ Session ID found:", sessionId)
-                    hitListCache = result.list
-                    isInitialized = true
-                    return sessionId, result.list
-                end
-                
-                -- Sometimes session ID is the first parameter we send back
-                -- Let's try to use a generated one or extract from response
-                sessionId = "auto_generated_" .. tostring(os.time())
-                hitListCache = result.list
-                isInitialized = true
-                print("✅ Using generated session ID:", sessionId)
-                return sessionId, result.list
-            end
-        else
-            warn("❌ Method", i, "failed:", result)
-        end
-    end
-    
-    return nil, nil
-end
-
--- Hook to intercept and learn session ID pattern
-local originalGetHitList
-local function hookGetHitList()
-    originalGetHitList = hookfunction(Remotes.GetHitList.InvokeServer, function(...)
-        local args = {...}
-        print("🔍 GetHitList called with args:", table.concat(args, ", "))
-        
-        local result = originalGetHitList(...)
-        
-        if result and result.ok then
-            print("✅ GetHitList success!")
-            
-            -- Store the session ID if it was passed
-            if args[2] and type(args[2]) == "string" and args[2] ~= "" then
-                sessionId = args[2]
-                print("📌 Session ID captured:", sessionId)
-            end
-            
-            hitListCache = result.list
-            isInitialized = true
-        end
-        
-        return result
-    end)
-end
-
--- Hook ScoutPlayer to bypass stamina
-local originalScoutPlayer
-local function hookScoutPlayer()
-    originalScoutPlayer = hookfunction(Remotes.ScoutPlayer.InvokeServer, function(...)
-        local args = {...}
-        local targetUserId = args[2] or args[1]
-        
-        -- Check cache first
-        if scoutCache[targetUserId] then
-            print("📦 Using cached scout data for:", targetUserId)
-            return scoutCache[targetUserId]
-        end
-        
-        print("🔍 Scouting player:", targetUserId, "with session:", args[1])
-        
-        local result = originalScoutPlayer(...)
-        
-        if result and result.ok then
-            scoutCache[targetUserId] = result
-            print("✅ Scout successful and cached!")
-        end
-        
-        return result
-    end)
-end
-
--- Initialize hooks
-hookGetHitList()
-hookScoutPlayer()
-
--- Function to initialize session
-local function initializeSession()
-    print("🔄 Initializing session...")
-    
-    local success, result = pcall(function()
-        -- Call GetHitList without session ID to get one
-        return Remotes.GetHitList:InvokeServer()
-    end)
-    
-    if not success then
-        -- Try with false parameter
-        success, result = pcall(function()
-            return Remotes.GetHitList:InvokeServer(false)
-        end)
-    end
-    
-    if success and result and result.ok then
+-- Hook GetHitList
+local originalGetHitList = Remotes.GetHitList.InvokeServer
+Remotes.GetHitList.InvokeServer = function(...)
+    local result = originalGetHitList(...)
+    if result and result.ok then
         hitListCache = result.list
-        isInitialized = true
-        
-        -- Session ID should be captured by hook
-        if not sessionId then
-            -- Generate a session ID if not captured
-            sessionId = ""
-        end
-        
-        print("✅ Session initialized! Found " .. #result.list .. " targets")
-        return true, result.list
-    else
-        warn("❌ Failed to initialize session:", result)
-        return false, nil
+        print("✅ Hit list cached:", #result.list, "targets")
     end
+    return result
+end
+
+-- Hook ScoutPlayer to prevent stamina usage
+local originalScoutPlayer = Remotes.ScoutPlayer.InvokeServer
+local scoutCallCount = {}
+
+Remotes.ScoutPlayer.InvokeServer = function(self, userId)
+    -- Check if we have cached data for this user
+    if scoutCache[userId] then
+        print("📦 Using cached scout data for UserID:", userId, "(No Stamina Used)")
+        return scoutCache[userId]
+    end
+    
+    -- Track call count
+    scoutCallCount[userId] = (scoutCallCount[userId] or 0) + 1
+    
+    print("🔍 First time scouting UserID:", userId, "(Will use 1 stamina)")
+    
+    -- Call original function (this will cost stamina on first call)
+    local result = originalScoutPlayer(self, userId)
+    
+    -- Cache the result for future calls
+    if result and result.ok then
+        scoutCache[userId] = result
+        print("✅ Scout data cached! Future scouts will be FREE")
+    end
+    
+    return result
+end
+
+-- Hook PlayerProfile
+local originalPlayerProfile = Remotes.PlayerProfile.InvokeServer
+Remotes.PlayerProfile.InvokeServer = function(self, userId)
+    if profileCache[userId] then
+        print("📦 Using cached profile for UserID:", userId)
+        return profileCache[userId]
+    end
+    
+    local result = originalPlayerProfile(self, userId)
+    
+    if result and result.ok then
+        profileCache[userId] = result
+        print("✅ Profile cached for UserID:", userId)
+    end
+    
+    return result
 end
 
 -- Functions
 local function getHitList()
     local success, result = pcall(function()
-        if sessionId and sessionId ~= "" then
-            return Remotes.GetHitList:InvokeServer(sessionId, false)
-        else
-            return Remotes.GetHitList:InvokeServer(false)
-        end
+        return Remotes.GetHitList:InvokeServer()
     end)
     
     if success and result and result.ok then
-        hitListCache = result.list
         return result.list
     end
     
@@ -182,17 +87,8 @@ local function getHitList()
 end
 
 local function getPlayerProfile(userId)
-    if not isInitialized then
-        warn("❌ Session not initialized!")
-        return nil
-    end
-    
     local success, result = pcall(function()
-        if sessionId and sessionId ~= "" then
-            return Remotes.PlayerProfile:InvokeServer(sessionId, userId)
-        else
-            return Remotes.PlayerProfile:InvokeServer(userId)
-        end
+        return Remotes.PlayerProfile:InvokeServer(userId)
     end)
     
     if success and result and result.ok then
@@ -202,17 +98,8 @@ local function getPlayerProfile(userId)
 end
 
 local function scoutPlayer(userId)
-    if not isInitialized then
-        warn("❌ Session not initialized!")
-        return nil
-    end
-    
     local success, result = pcall(function()
-        if sessionId and sessionId ~= "" then
-            return Remotes.ScoutPlayer:InvokeServer(sessionId, userId)
-        else
-            return Remotes.ScoutPlayer:InvokeServer(userId)
-        end
+        return Remotes.ScoutPlayer:InvokeServer(userId)
     end)
     
     if success and result and result.ok then
@@ -296,10 +183,10 @@ local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(0, 200, 1, 0)
 StatusLabel.Position = UDim2.new(1, -210, 0, 0)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "⏳ Initializing..."
+StatusLabel.Text = "✅ Ready (Hooks Active)"
 StatusLabel.Font = Enum.Font.Gotham
 StatusLabel.TextSize = 11
-StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Right
 StatusLabel.Parent = TopBar
 
@@ -362,57 +249,61 @@ ListPadding.PaddingTop = UDim.new(0, 5)
 ListPadding.PaddingBottom = UDim.new(0, 5)
 ListPadding.Parent = RightPanel
 
--- Session Info Display
-local SessionInfoFrame = Instance.new("Frame")
-SessionInfoFrame.Size = UDim2.new(1, -20, 0, 60)
-SessionInfoFrame.Position = UDim2.new(0, 10, 0, 10)
-SessionInfoFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-SessionInfoFrame.BorderSizePixel = 0
-SessionInfoFrame.Parent = LeftPanel
+-- Stats Display
+local StatsFrame = Instance.new("Frame")
+StatsFrame.Size = UDim2.new(1, -20, 0, 80)
+StatsFrame.Position = UDim2.new(0, 10, 0, 10)
+StatsFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+StatsFrame.BorderSizePixel = 0
+StatsFrame.Parent = LeftPanel
 
-local SessionInfoCorner = Instance.new("UICorner")
-SessionInfoCorner.CornerRadius = UDim.new(0, 6)
-SessionInfoCorner.Parent = SessionInfoFrame
+local StatsCorner = Instance.new("UICorner")
+StatsCorner.CornerRadius = UDim.new(0, 6)
+StatsCorner.Parent = StatsFrame
 
-local SessionInfoTitle = Instance.new("TextLabel")
-SessionInfoTitle.Size = UDim2.new(1, -10, 0, 20)
-SessionInfoTitle.Position = UDim2.new(0, 5, 0, 5)
-SessionInfoTitle.BackgroundTransparency = 1
-SessionInfoTitle.Text = "📡 Session Info"
-SessionInfoTitle.Font = Enum.Font.GothamBold
-SessionInfoTitle.TextSize = 12
-SessionInfoTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-SessionInfoTitle.TextXAlignment = Enum.TextXAlignment.Left
-SessionInfoTitle.Parent = SessionInfoFrame
+local StatsTitle = Instance.new("TextLabel")
+StatsTitle.Size = UDim2.new(1, -10, 0, 20)
+StatsTitle.Position = UDim2.new(0, 5, 0, 5)
+StatsTitle.BackgroundTransparency = 1
+StatsTitle.Text = "📊 Scout Statistics"
+StatsTitle.Font = Enum.Font.GothamBold
+StatsTitle.TextSize = 12
+StatsTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+StatsTitle.TextXAlignment = Enum.TextXAlignment.Left
+StatsTitle.Parent = StatsFrame
 
-local SessionInfoText = Instance.new("TextLabel")
-SessionInfoText.Size = UDim2.new(1, -10, 0, 30)
-SessionInfoText.Position = UDim2.new(0, 5, 0, 25)
-SessionInfoText.BackgroundTransparency = 1
-SessionInfoText.Text = "Not initialized"
-SessionInfoText.Font = Enum.Font.Gotham
-SessionInfoText.TextSize = 9
-SessionInfoText.TextColor3 = Color3.fromRGB(200, 200, 200)
-SessionInfoText.TextXAlignment = Enum.TextXAlignment.Left
-SessionInfoText.TextYAlignment = Enum.TextYAlignment.Top
-SessionInfoText.TextWrapped = true
-SessionInfoText.Parent = SessionInfoFrame
+local StatsText = Instance.new("TextLabel")
+StatsText.Size = UDim2.new(1, -10, 0, 50)
+StatsText.Position = UDim2.new(0, 5, 0, 25)
+StatsText.BackgroundTransparency = 1
+StatsText.Text = "Cached: 0\nStamina Saved: 0"
+StatsText.Font = Enum.Font.Gotham
+StatsText.TextSize = 11
+StatsText.TextColor3 = Color3.fromRGB(100, 255, 100)
+StatsText.TextXAlignment = Enum.TextXAlignment.Left
+StatsText.TextYAlignment = Enum.TextYAlignment.Top
+StatsText.Parent = StatsFrame
+
+local function updateStats()
+    local cached = 0
+    for _ in pairs(scoutCache) do
+        cached = cached + 1
+    end
+    
+    local saved = 0
+    for _, count in pairs(scoutCallCount) do
+        if count > 1 then
+            saved = saved + (count - 1)
+        end
+    end
+    
+    StatsText.Text = string.format("📦 Cached: %d targets\n⚡ Stamina Saved: %d", cached, saved)
+end
 
 -- Update status function
 local function updateStatus(text, color)
     StatusLabel.Text = text
     StatusLabel.TextColor3 = color or Color3.fromRGB(100, 255, 100)
-end
-
-local function updateSessionInfo()
-    if isInitialized then
-        SessionInfoText.Text = string.format("Status: ✅ Active\nID: %s\nTargets: %d", 
-            sessionId or "Dynamic",
-            hitListCache and #hitListCache or 0
-        )
-    else
-        SessionInfoText.Text = "Status: ❌ Not initialized\nClick Initialize button"
-    end
 end
 
 -- Clear hit list
@@ -436,6 +327,11 @@ local function createTargetCard(target, index)
     local CardCorner = Instance.new("UICorner")
     CardCorner.CornerRadius = UDim.new(0, 6)
     CardCorner.Parent = Card
+    
+    -- Highlight if already cached
+    if scoutCache[target.userId] then
+        Card.BackgroundColor3 = Color3.fromRGB(50, 60, 50)
+    end
     
     local NameLabel = Instance.new("TextLabel")
     NameLabel.Size = UDim2.new(1, -10, 0, 25)
@@ -486,7 +382,7 @@ local function createTargetCard(target, index)
     ScoutBtn.Size = UDim2.new(0, 100, 0, 25)
     ScoutBtn.Position = UDim2.new(0, 5, 1, -30)
     ScoutBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-    ScoutBtn.Text = "🔍 Scout"
+    ScoutBtn.Text = scoutCache[target.userId] and "🔍 Re-Scout" or "🔍 Scout"
     ScoutBtn.Font = Enum.Font.GothamBold
     ScoutBtn.TextSize = 12
     ScoutBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -516,25 +412,48 @@ local function createTargetCard(target, index)
     StatsLabel.BackgroundTransparency = 1
     StatsLabel.Text = ""
     StatsLabel.Font = Enum.Font.GothamBold
-    StatsLabel.TextSize = 12
+    StatsLabel.TextSize = 11
     StatsLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
     StatsLabel.TextXAlignment = Enum.TextXAlignment.Right
     StatsLabel.Parent = Card
     
-    -- Scout Button Click
-    ScoutBtn.MouseButton1Click:Connect(function()
-        if not isInitialized then
-            updateStatus("❌ Initialize session first!", Color3.fromRGB(255, 100, 100))
-            return
+    -- Show cached data if available
+    if scoutCache[target.userId] then
+        local cached = scoutCache[target.userId]
+        local difficulty, color
+        
+        if cached.atk < 15 and cached.def < 15 then
+            difficulty = "✅ EASY"
+            color = Color3.fromRGB(100, 255, 100)
+        elseif cached.atk < 20 and cached.def < 20 then
+            difficulty = "⚠️ MEDIUM"
+            color = Color3.fromRGB(255, 200, 100)
+        else
+            difficulty = "❌ HARD"
+            color = Color3.fromRGB(255, 100, 100)
         end
         
+        StatsLabel.Text = string.format("⚔️%d 🛡️%d 👥%d %s", 
+            cached.atk, cached.def, cached.crew, difficulty)
+        StatsLabel.TextColor3 = color
+    end
+    
+    -- Scout Button Click
+    ScoutBtn.MouseButton1Click:Connect(function()
         if target.shielded then
             updateStatus("❌ Target is shielded!", Color3.fromRGB(255, 100, 100))
             return
         end
         
-        updateStatus("🔍 Scouting " .. target.name .. "...", Color3.fromRGB(255, 200, 100))
-        ScoutBtn.Text = "⏳ Scouting..."
+        local wasCached = scoutCache[target.userId] ~= nil
+        
+        if wasCached then
+            updateStatus("📦 Loading from cache (FREE)...", Color3.fromRGB(100, 255, 100))
+        else
+            updateStatus("🔍 Scouting " .. target.name .. " (1 Stamina)...", Color3.fromRGB(255, 200, 100))
+        end
+        
+        ScoutBtn.Text = "⏳ Loading..."
         ScoutBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
         
         task.spawn(function()
@@ -560,7 +479,15 @@ local function createTargetCard(target, index)
                 
                 ScoutBtn.Text = "✅ Scouted"
                 ScoutBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
-                updateStatus("✅ Scout complete! (No Stamina)", Color3.fromRGB(100, 255, 100))
+                Card.BackgroundColor3 = Color3.fromRGB(50, 60, 50)
+                
+                if wasCached then
+                    updateStatus("✅ Loaded from cache (No Stamina Used)", Color3.fromRGB(100, 255, 100))
+                else
+                    updateStatus("✅ Scouted! (Cached for FREE re-scouts)", Color3.fromRGB(100, 255, 100))
+                end
+                
+                updateStats()
             else
                 ScoutBtn.Text = "❌ Failed"
                 ScoutBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
@@ -568,30 +495,133 @@ local function createTargetCard(target, index)
             end
             
             wait(2)
-            if ScoutBtn.Text == "✅ Scouted" then
-                ScoutBtn.Text = "🔍 Re-Scout"
-                ScoutBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-            elseif ScoutBtn.Text == "❌ Failed" then
-                ScoutBtn.Text = "🔍 Retry"
-                ScoutBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-            end
+            ScoutBtn.Text = "🔍 Re-Scout"
+            ScoutBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
         end)
     end)
     
-    -- Profile Button Click (similar implementation as before)
+    -- Profile Button Click
     ProfileBtn.MouseButton1Click:Connect(function()
-        if not isInitialized then
-            updateStatus("❌ Initialize session first!", Color3.fromRGB(255, 100, 100))
-            return
-        end
-        
         updateStatus("👤 Loading profile...", Color3.fromRGB(255, 200, 100))
         
         task.spawn(function()
             local profile = getPlayerProfile(target.userId)
             
             if profile then
-                -- Create profile popup (same as before)
+                local ProfilePopup = Instance.new("Frame")
+                ProfilePopup.Size = UDim2.new(0, 400, 0, 400)
+                ProfilePopup.Position = UDim2.new(0.5, -200, 0.5, -200)
+                ProfilePopup.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+                ProfilePopup.BorderSizePixel = 0
+                ProfilePopup.ZIndex = 10
+                ProfilePopup.Parent = ScreenGui
+                
+                local PopupCorner = Instance.new("UICorner")
+                PopupCorner.CornerRadius = UDim.new(0, 10)
+                PopupCorner.Parent = ProfilePopup
+                
+                local PopupTitle = Instance.new("TextLabel")
+                PopupTitle.Size = UDim2.new(1, -40, 0, 40)
+                PopupTitle.Position = UDim2.new(0, 10, 0, 10)
+                PopupTitle.BackgroundTransparency = 1
+                PopupTitle.Text = "👤 " .. target.name .. " Profile"
+                PopupTitle.Font = Enum.Font.GothamBold
+                PopupTitle.TextSize = 16
+                PopupTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+                PopupTitle.TextXAlignment = Enum.TextXAlignment.Left
+                PopupTitle.Parent = ProfilePopup
+                
+                local ClosePopup = Instance.new("TextButton")
+                ClosePopup.Size = UDim2.new(0, 30, 0, 30)
+                ClosePopup.Position = UDim2.new(1, -35, 0, 5)
+                ClosePopup.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+                ClosePopup.Text = "X"
+                ClosePopup.Font = Enum.Font.GothamBold
+                ClosePopup.TextSize = 14
+                ClosePopup.TextColor3 = Color3.fromRGB(255, 255, 255)
+                ClosePopup.Parent = ProfilePopup
+                
+                local ClosePopupCorner = Instance.new("UICorner")
+                ClosePopupCorner.CornerRadius = UDim.new(0, 6)
+                ClosePopupCorner.Parent = ClosePopup
+                
+                ClosePopup.MouseButton1Click:Connect(function()
+                    ProfilePopup:Destroy()
+                end)
+                
+                local ProfileScroll = Instance.new("ScrollingFrame")
+                ProfileScroll.Size = UDim2.new(1, -20, 1, -60)
+                ProfileScroll.Position = UDim2.new(0, 10, 0, 50)
+                ProfileScroll.BackgroundTransparency = 1
+                ProfileScroll.BorderSizePixel = 0
+                ProfileScroll.ScrollBarThickness = 4
+                ProfileScroll.CanvasSize = UDim2.new(0, 0, 0, 500)
+                ProfileScroll.Parent = ProfilePopup
+                
+                local ProfileInfo = Instance.new("TextLabel")
+                ProfileInfo.Size = UDim2.new(1, -10, 0, 490)
+                ProfileInfo.BackgroundTransparency = 1
+                ProfileInfo.Font = Enum.Font.Gotham
+                ProfileInfo.TextSize = 12
+                ProfileInfo.TextColor3 = Color3.fromRGB(220, 220, 220)
+                ProfileInfo.TextXAlignment = Enum.TextXAlignment.Left
+                ProfileInfo.TextYAlignment = Enum.TextYAlignment.Top
+                ProfileInfo.TextWrapped = true
+                ProfileInfo.Parent = ProfileScroll
+                
+                local gear = profile.gear or {}
+                local scoutData = scoutCache[target.userId]
+                
+                local profileText = {
+                    "━━━━━━━━━━━━━━━━━━━━━━━━",
+                    "📊 BASIC INFO",
+                    "━━━━━━━━━━━━━━━━━━━━━━━━",
+                    string.format("Level: %d", profile.level),
+                    string.format("Respect: %d", profile.respect),
+                    string.format("Family: %s", profile.familyName or "None"),
+                    string.format("Role: %s", profile.role or "Member"),
+                    string.format("Status: %s", profile.online and "🟢 Online" or "🔴 Offline"),
+                    "",
+                }
+                
+                if scoutData then
+                    table.insert(profileText, "━━━━━━━━━━━━━━━━━━━━━━━━")
+                    table.insert(profileText, "⚔️ COMBAT STATS")
+                    table.insert(profileText, "━━━━━━━━━━━━━━━━━━━━━━━━")
+                    table.insert(profileText, string.format("Attack: %d", scoutData.atk))
+                    table.insert(profileText, string.format("Defense: %d", scoutData.def))
+                    table.insert(profileText, string.format("Crew Size: %d", scoutData.crew))
+                    table.insert(profileText, "")
+                end
+                
+                table.insert(profileText, "━━━━━━━━━━━━━━━━━━━━━━━━")
+                table.insert(profileText, "⚔️ GEAR & EQUIPMENT")
+                table.insert(profileText, "━━━━━━━━━━━━━━━━━━━━━━━━")
+                table.insert(profileText, string.format("Weapon: %s", gear.weapon or "None"))
+                table.insert(profileText, string.format("Armor: %s", gear.armor or "None"))
+                table.insert(profileText, string.format("Vehicle: %s", gear.vehicle or "None"))
+                table.insert(profileText, "")
+                table.insert(profileText, "━━━━━━━━━━━━━━━━━━━━━━━━")
+                table.insert(profileText, "📈 STATISTICS")
+                table.insert(profileText, "━━━━━━━━━━━━━━━━━━━━━━━━")
+                table.insert(profileText, string.format("Playtime: %d hours", math.floor(profile.playtime / 3600)))
+                table.insert(profileText, string.format("Donated: $%s", tostring(profile.donated or 0)))
+                table.insert(profileText, string.format("Gold Donated: %s", tostring(profile.donatedGold or 0)))
+                table.insert(profileText, string.format("Contributed: %s", tostring(profile.contributed or 0)))
+                table.insert(profileText, string.format("Scout Cost: %d stamina", profile.scoutCost or 1))
+                
+                if profile.displayTrophies and #profile.displayTrophies > 0 then
+                    table.insert(profileText, "")
+                    table.insert(profileText, "━━━━━━━━━━━━━━━━━━━━━━━━")
+                    table.insert(profileText, "🏆 TROPHIES")
+                    table.insert(profileText, "━━━━━━━━━━━━━━━━━━━━━━━━")
+                    for _, trophy in ipairs(profile.displayTrophies) do
+                        table.insert(profileText, "• " .. trophy)
+                    end
+                end
+                
+                ProfileInfo.Text = table.concat(profileText, "\n")
+                
                 updateStatus("✅ Profile loaded!", Color3.fromRGB(100, 255, 100))
             else
                 updateStatus("❌ Failed to load profile!", Color3.fromRGB(255, 100, 100))
@@ -604,16 +634,6 @@ end
 
 -- Display hit list
 local function displayHitList()
-    if not isInitialized then
-        updateStatus("⏳ Initializing session...", Color3.fromRGB(255, 200, 100))
-        local success = initializeSession()
-        if not success then
-            updateStatus("❌ Failed to initialize!", Color3.fromRGB(255, 100, 100))
-            return
-        end
-        updateSessionInfo()
-    end
-    
     clearHitList()
     updateStatus("📜 Loading hit list...", Color3.fromRGB(255, 200, 100))
     
@@ -626,6 +646,7 @@ local function displayHitList()
         
         RightPanel.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 10)
         updateStatus(string.format("✅ Loaded %d targets", #hitList), Color3.fromRGB(100, 255, 100))
+        updateStats()
     else
         updateStatus("❌ Failed to load hit list!", Color3.fromRGB(255, 100, 100))
     end
@@ -634,11 +655,6 @@ end
 -- Auto scout all
 local autoScoutRunning = false
 local function autoScoutAll()
-    if not isInitialized then
-        updateStatus("❌ Initialize session first!", Color3.fromRGB(255, 100, 100))
-        return
-    end
-    
     if autoScoutRunning then
         updateStatus("⏸️ Auto scout already running!", Color3.fromRGB(255, 200, 100))
         return
@@ -657,15 +673,23 @@ local function autoScoutAll()
         
         local scouted = 0
         local total = 0
+        local cached = 0
         
         for i, target in ipairs(hitList) do
             if not target.shielded and target.online then
                 total = total + 1
+                local wasCached = scoutCache[target.userId] ~= nil
+                
                 local scoutData = scoutPlayer(target.userId)
                 if scoutData then
                     scouted = scouted + 1
-                    print(string.format("✅ [%d/%d] %s - ATK:%d DEF:%d", 
-                        i, #hitList, target.name, scoutData.atk, scoutData.def))
+                    if wasCached then
+                        cached = cached + 1
+                        print(string.format("📦 [%d/%d] %s - FREE (Cached)", i, #hitList, target.name))
+                    else
+                        print(string.format("✅ [%d/%d] %s - ATK:%d DEF:%d (1 Stamina)", 
+                            i, #hitList, target.name, scoutData.atk, scoutData.def))
+                    end
                 end
                 
                 updateStatus(string.format("🤖 Scouting... [%d/%d]", i, #hitList), Color3.fromRGB(100, 200, 255))
@@ -673,9 +697,11 @@ local function autoScoutAll()
             end
         end
         
-        updateStatus(string.format("✅ Done! %d/%d scouted", scouted, total), Color3.fromRGB(100, 255, 100))
+        updateStatus(string.format("✅ Done! %d scouted (%d cached, %d new)", 
+            scouted, cached, scouted - cached), Color3.fromRGB(100, 255, 100))
         autoScoutRunning = false
         
+        updateStats()
         wait(1)
         displayHitList()
     end)
@@ -711,30 +737,21 @@ local function createButton(text, position, callback)
 end
 
 -- Control Buttons
-local InitBtn = createButton("🔄 Initialize Session", UDim2.new(0, 10, 0, 80), function()
-    updateStatus("🔄 Initializing...", Color3.fromRGB(255, 200, 100))
-    local success = initializeSession()
-    if success then
-        updateStatus("✅ Session initialized!", Color3.fromRGB(100, 255, 100))
-        updateSessionInfo()
-        wait(0.5)
-        displayHitList()
-    else
-        updateStatus("❌ Failed to initialize!", Color3.fromRGB(255, 100, 100))
-    end
-end)
-
-local RefreshBtn = createButton("📋 Refresh List", UDim2.new(0, 10, 0, 120), displayHitList)
-local AutoScoutBtn = createButton("🤖 Auto Scout All", UDim2.new(0, 10, 0, 160), autoScoutAll)
-local ClearCacheBtn = createButton("🗑️ Clear Cache", UDim2.new(0, 10, 0, 200), function()
+local RefreshBtn = createButton("📋 Refresh List", UDim2.new(0, 10, 0, 100), displayHitList)
+local AutoScoutBtn = createButton("🤖 Auto Scout All", UDim2.new(0, 10, 0, 140), autoScoutAll)
+local ClearCacheBtn = createButton("🗑️ Clear Cache", UDim2.new(0, 10, 0, 180), function()
     scoutCache = {}
+    profileCache = {}
+    scoutCallCount = {}
     updateStatus("✅ Cache cleared!", Color3.fromRGB(100, 255, 100))
+    updateStats()
+    displayHitList()
 end)
 
 -- Info Section
 local InfoFrame = Instance.new("Frame")
-InfoFrame.Size = UDim2.new(1, -20, 0, 160)
-InfoFrame.Position = UDim2.new(0, 10, 1, -170)
+InfoFrame.Size = UDim2.new(1, -20, 0, 180)
+InfoFrame.Position = UDim2.new(0, 10, 1, -190)
 InfoFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
 InfoFrame.BorderSizePixel = 0
 InfoFrame.Parent = LeftPanel
@@ -747,7 +764,7 @@ local InfoTitle = Instance.new("TextLabel")
 InfoTitle.Size = UDim2.new(1, -10, 0, 25)
 InfoTitle.Position = UDim2.new(0, 5, 0, 5)
 InfoTitle.BackgroundTransparency = 1
-InfoTitle.Text = "ℹ️ Information"
+InfoTitle.Text = "ℹ️ How It Works"
 InfoTitle.Font = Enum.Font.GothamBold
 InfoTitle.TextSize = 13
 InfoTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -767,46 +784,34 @@ InfoText.TextWrapped = true
 InfoText.Parent = InfoFrame
 
 InfoText.Text = [[
-✅ Features:
-• Dynamic Session ID
-• No Stamina Cost
-• Auto Initialize
-• Cache System
+✅ First scout: Uses 1 stamina
+✅ Re-scout: FREE (cached)
+✅ Green cards: Already cached
 
-📋 Difficulty:
+📋 Difficulty Rating:
 ✅ EASY - ATK/DEF < 15
 ⚠️ MEDIUM - ATK/DEF < 20
 ❌ HARD - ATK/DEF ≥ 20
 
-Status Icons:
-🟢 Online | 🔴 Offline
+💡 Tip: Scout all targets once,
+then re-scout anytime for FREE!
+
+Status: 🟢 Online | 🔴 Offline
 🛡️ Shielded
 ]]
 
--- Auto initialize on load
+-- Auto load on start
 task.spawn(function()
     wait(1)
-    print("🔄 Auto-initializing session...")
-    print("📡 Fetching dynamic session ID from GetHitList...")
-    
-    local success = initializeSession()
-    if success then
-        print("✅ Session initialized successfully!")
-        print("📌 Session ID:", sessionId or "Dynamic")
-        updateStatus("✅ Auto-initialized!", Color3.fromRGB(100, 255, 100))
-        updateSessionInfo()
-        wait(0.5)
-        displayHitList()
-    else
-        warn("❌ Auto-initialization failed! Click Initialize button manually.")
-        updateStatus("❌ Click Initialize!", Color3.fromRGB(255, 200, 100))
-    end
+    print("🔄 Auto-loading hit list...")
+    displayHitList()
 end)
 
 print([[
 ╔════════════════════════════════════╗
 ║   AUTO SCOUTING UI LOADED! 🎯      ║
-║   Dynamic Session System           ║
-║   Fetching Session ID...           ║
+║   Hooks Active - Cache System      ║
+║   First Scout: 1 Stamina           ║
+║   Re-Scout: FREE Forever!          ║
 ╚════════════════════════════════════╝
 ]])
