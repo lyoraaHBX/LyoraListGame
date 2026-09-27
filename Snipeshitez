@@ -1,13 +1,15 @@
 -- [[ MAIN LOADER - CLEAN & OBFUSCATION FRIENDLY ]] --
--- File ini SENGAJA dibuat setipis mungkin. Semua logic berat
--- dipecah jadi module terpisah agar tidak membebani proses
--- obfuscation & runtime deobfuscation (mencegah CPU/Memory spike).
 
 local BASE_URL = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/"
 local LIB_URL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
 
+-- Cache-buster: paksa GitHub CDN kasih versi terbaru, bukan versi cache lama
+local function NoCacheUrl(url)
+    return url .. "?t=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
+end
+
 local function LoadRemote(url)
-    local ok, src = pcall(game.HttpGet, game, url)
+    local ok, src = pcall(game.HttpGet, game, NoCacheUrl(url))
     if not ok then
         error("[Loader] Gagal fetch: " .. url .. " | " .. tostring(src))
     end
@@ -23,12 +25,12 @@ end
 -- 1. Load Library UI
 local LunoLibrary = LoadRemote(LIB_URL)
 
--- 2. Load Data Modules (JSON-like data, ringan)
+-- 2. Load Data Modules
 local JobsData = LoadRemote(BASE_URL .. "JobsData.lua")
 local OperationsData = LoadRemote(BASE_URL .. "OperationsData.lua")
 local PropertiesData = LoadRemote(BASE_URL .. "PropertiesData.lua")
 
--- 3. Load Shared Core (utils, scheduler, state monitor, UI window/tabs)
+-- 3. Load Shared Core
 local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
 local Context = SharedCore.Init(LunoLibrary)
 
@@ -44,9 +46,10 @@ local FeatureModules = {
     { url = BASE_URL .. "OperationModule.lua",   args = { OperationsData.OPERATIONS } },
 }
 
-for _, feature in ipairs(FeatureModules) do
+for i, feature in ipairs(FeatureModules) do
     local ok, mod = pcall(LoadRemote, feature.url)
     if ok and mod and mod.Init then
+        print("[Loader] Loading order #" .. i .. ": " .. feature.url) -- debug, boleh dihapus nanti
         local initOk, initErr = pcall(mod.Init, Context, table.unpack(feature.args))
         if not initOk then
             warn("[FeatureInit Error] " .. feature.url .. ": " .. tostring(initErr))
