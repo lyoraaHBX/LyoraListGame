@@ -29,6 +29,7 @@ local LunoLibrary = LoadRemote(LIB_URL)
 local JobsData = LoadRemote(BASE_URL .. "JobsData.lua")
 local OperationsData = LoadRemote(BASE_URL .. "OperationsData.lua")
 local PropertiesData = LoadRemote(BASE_URL .. "PropertiesData.lua")
+local ShopData = LoadRemote(BASE_URL .. "ShopData.lua") -- [NEW] data khusus Shop (modular)
 
 -- 3. Load Shared Core
 local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
@@ -57,4 +58,337 @@ for i, feature in ipairs(FeatureModules) do
     else
         warn("[FeatureLoad Error] " .. feature.url .. ": " .. tostring(mod))
     end
+end
+
+--======================================================================
+-- [[ BANK & SHOP - INLINE (BELUM DIJADIKAN MODULE, UNTUK DEBUG DULU) ]] --
+--======================================================================
+do
+    local Players = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local LocalPlayer = Players.LocalPlayer
+
+    local SHOP = ShopData.SHOP or {}
+
+    print("[BankShop][Debug] Mulai inisialisasi Bank & Shop inline...")
+
+    -----------------------------------------------------------------
+    -- Ambil Window dari Context (SESUAIKAN sesuai isi SharedCore.lua)
+    -----------------------------------------------------------------
+    local Window = Context.Window
+    if not Window or not Window.CreateTab then
+        warn("[BankShop][Debug] Context.Window tidak ditemukan / tidak punya CreateTab. Cek SharedCore.lua!")
+        return
+    end
+
+    local ok_tab, Tab = pcall(function()
+        return Window:CreateTab("Bank & Shop", 0)
+    end)
+
+    if not ok_tab then
+        warn("[BankShop][Debug] Gagal buat Tab: " .. tostring(Tab))
+        return
+    end
+    print("[BankShop][Debug] Tab 'Bank & Shop' berhasil dibuat.")
+
+    local function Notify(title, content, duration)
+        print(("[BankShop][Notify] %s: %s"):format(title, tostring(content)))
+        if Context.Notify then
+            pcall(Context.Notify, title, content, duration)
+        end
+    end
+
+    -----------------------------------------------------------------
+    -- Remotes
+    -----------------------------------------------------------------
+    local ok_remotes, DepositEvent, BuyShopEvent = pcall(function()
+        local MWFolder = ReplicatedStorage:WaitForChild("MW", 10)
+        local RemotesFolder = MWFolder:WaitForChild("Remotes", 10)
+        local dep = RemotesFolder:WaitForChild("Deposit", 10)
+        local buy = RemotesFolder:WaitForChild("BuyShopItem", 10)
+        return dep, buy
+    end)
+
+    if not ok_remotes then
+        warn("[BankShop][Debug] Gagal ambil remotes MW.Remotes.Deposit / BuyShopItem: " .. tostring(DepositEvent))
+        return
+    end
+    print("[BankShop][Debug] Remotes Deposit & BuyShopItem berhasil diambil.")
+
+    -----------------------------------------------------------------
+    -- Character/Profile ID
+    -- Remote butuh ID unik ("ca01587a32b24eb1a0527e8e595e8483").
+    -- Karena sumber ID pastinya belum diketahui, disediakan
+    -- input manual dulu supaya gampang di-debug.
+    -----------------------------------------------------------------
+    local ManualCharId = ""
+
+    local function GetCharacterId()
+        if ManualCharId ~= "" then
+            return ManualCharId
+        end
+
+        local ok, id = pcall(function()
+            return LocalPlayer:GetAttribute("ActiveCharacterId")
+                or LocalPlayer:GetAttribute("CharacterId")
+                or LocalPlayer:GetAttribute("CharId")
+        end)
+
+        if ok and id and id ~= "" then
+            return id
+        end
+
+        return nil
+    end
+
+    -----------------------------------------------------------------
+    -- SECTION: BANK
+    -----------------------------------------------------------------
+    local BankSection = Tab:CreateSection("Auto Deposit Bank")
+
+    BankSection:CreateInput({
+        Name = "Character/Profile ID (isi manual jika auto-detect gagal)",
+        PlaceholderText = "contoh: ca01587a32b24eb1a0527e8e595e8483",
+        RemoveTextAfterFocusLost = false,
+        Callback = function(text)
+            ManualCharId = text or ""
+            print("[BankShop][Debug] ManualCharId diset ke: " .. ManualCharId)
+        end,
+    })
+
+    local DepositAmount = 1000
+    BankSection:CreateInput({
+        Name = "Jumlah Deposit",
+        PlaceholderText = "1000",
+        RemoveTextAfterFocusLost = false,
+        Callback = function(text)
+            local num = tonumber(text)
+            if num and num > 0 then
+                DepositAmount = math.floor(num)
+                print("[BankShop][Debug] DepositAmount diset ke: " .. DepositAmount)
+            else
+                Notify("Bank", "Jumlah deposit tidak valid", 3)
+            end
+        end,
+    })
+
+    local DepositDelay = 1.5 -- delay antar deposit (detik), jaga CPU/memory tetap stabil
+    BankSection:CreateInput({
+        Name = "Delay Antar Deposit (detik, min 0.2)",
+        PlaceholderText = "1.5",
+        RemoveTextAfterFocusLost = false,
+        Callback = function(text)
+            local num = tonumber(text)
+            if num and num >= 0.2 then
+                DepositDelay = num
+                print("[BankShop][Debug] DepositDelay diset ke: " .. DepositDelay)
+            else
+                Notify("Bank", "Delay minimal 0.2 detik", 3)
+            end
+        end,
+    })
+
+    local function DoDeposit()
+        local charId = GetCharacterId()
+        if not charId then
+            Notify("Bank", "Character ID tidak ditemukan! Isi manual di field.", 4)
+            return false
+        end
+
+        local ok, result = pcall(function()
+            return table.pack(DepositEvent:InvokeServer(charId, DepositAmount))
+        end)
+
+        if not ok then
+            warn("[BankShop][Debug] Error saat InvokeServer Deposit: " .. tostring(result))
+            return false
+        end
+
+        if result and result[1] and result[1].ok then
+            print(("[BankShop][Debug] Deposit sukses | fee=%s kept=%s"):format(
+                tostring(result[1].fee), tostring(result[1].kept)
+            ))
+            return true
+        end
+
+        warn("[BankShop][Debug] Deposit gagal, response: " .. tostring(result))
+        return false
+    end
+
+    local AutoDepositEnabled = false
+
+    BankSection:CreateToggle({
+        Name = "Auto Deposit (Loop Aman dengan Delay)",
+        CurrentValue = false,
+        Callback = function(value)
+            AutoDepositEnabled = value
+            if not value then
+                Notify("Bank", "Auto Deposit dihentikan", 3)
+                return
+            end
+
+            Notify("Bank", "Auto Deposit dimulai...", 3)
+
+            task.spawn(function()
+                while AutoDepositEnabled do
+                    local success = DoDeposit()
+                    -- kalau gagal, delay diperpanjang supaya tidak spam invoke sia-sia
+                    task.wait(success and DepositDelay or (DepositDelay * 2))
+                end
+                print("[BankShop][Debug] Loop Auto Deposit berhenti.")
+            end)
+        end,
+    })
+
+    BankSection:CreateButton({
+        Name = "Deposit Sekali (untuk testing manual)",
+        Callback = function()
+            local success = DoDeposit()
+            Notify("Bank", success and "Deposit berhasil" or "Deposit gagal", 3)
+        end,
+    })
+
+    -----------------------------------------------------------------
+    -- SECTION: SHOP
+    -----------------------------------------------------------------
+    local ShopSection = Tab:CreateSection("Auto Buy Shop")
+
+    local ItemOptions = {}
+    for _, data in ipairs(SHOP) do
+        table.insert(ItemOptions, data.item)
+    end
+
+    local SelectedItems = {}
+
+    ShopSection:CreateDropdown({
+        Name = "Pilih Item untuk Auto Buy",
+        Options = ItemOptions,
+        MultipleOptions = true,
+        CurrentOption = {},
+        Callback = function(options)
+            SelectedItems = options or {}
+            print("[BankShop][Debug] SelectedItems: " .. table.concat(SelectedItems, ", "))
+        end,
+    })
+
+    local BuyDelay = 0.5 -- delay antar percobaan buy per item, cegah spike
+    local AutoBuyEnabled = false
+
+    local function BuyItem(itemId)
+        local charId = GetCharacterId()
+        if not charId then
+            Notify("Shop", "Character ID tidak ditemukan!", 3)
+            return false
+        end
+
+        local ok, result = pcall(function()
+            return table.pack(BuyShopEvent:InvokeServer(charId, itemId, nil, nil))
+        end)
+
+        if not ok then
+            warn("[BankShop][Debug] Error saat InvokeServer BuyShopItem: " .. tostring(result))
+            return false
+        end
+
+        if result and result[1] and result[1].ok then
+            print("[BankShop][Debug] Berhasil beli item: " .. itemId)
+            return true
+        end
+
+        warn(("[BankShop][Debug] Gagal beli %s, response: %s"):format(itemId, tostring(result)))
+        return false
+    end
+
+    local function TryBuySelected()
+        if #SelectedItems == 0 then
+            print("[BankShop][Debug] TryBuySelected dipanggil tapi tidak ada item terpilih.")
+            return
+        end
+
+        task.spawn(function()
+            print("[BankShop][Debug] Mulai proses beli " .. #SelectedItems .. " item terpilih...")
+            for _, itemId in ipairs(SelectedItems) do
+                local success = BuyItem(itemId)
+                if success then
+                    Notify("Shop", "Berhasil beli: " .. itemId, 3)
+                end
+                task.wait(BuyDelay) -- delay kecil antar item, tetap ringan di CPU
+            end
+        end)
+    end
+
+    ShopSection:CreateToggle({
+        Name = "Auto Buy saat Stock Baru",
+        CurrentValue = false,
+        Callback = function(value)
+            AutoBuyEnabled = value
+            if value then
+                Notify("Shop", "Auto Buy aktif, sinkron dengan restock timer...", 3)
+                TryBuySelected() -- langsung coba sekali kalau kebetulan diaktifkan saat stock fresh
+            else
+                Notify("Shop", "Auto Buy dihentikan", 3)
+            end
+        end,
+    })
+
+    ShopSection:CreateButton({
+        Name = "Buy Sekali (untuk testing manual)",
+        Callback = function()
+            TryBuySelected()
+        end,
+    })
+
+    -----------------------------------------------------------------
+    -- Monitor RestockText -> deteksi refresh stock via ContentText
+    -- Hanya trigger buy PERSIS saat stock baru muncul (bukan spam tiap detik)
+    -----------------------------------------------------------------
+    local function GetRestockLabel()
+        local ok, label = pcall(function()
+            return LocalPlayer.PlayerGui.MafiaWarsUI.Root.Content.ShopPanel.RestockText
+        end)
+        if ok then return label end
+        return nil
+    end
+
+    local function ParseRemainingSeconds(text)
+        -- format contoh: "NEW STOCK IN 4:59"
+        local m, s = text:match("(%d+):(%d+)")
+        if m and s then
+            return tonumber(m) * 60 + tonumber(s)
+        end
+        return nil
+    end
+
+    -- 1 thread ringan, cek tiap 1 detik saja (bukan busy loop) supaya CPU tetap adem
+    task.spawn(function()
+        local lastRemaining = nil
+        print("[BankShop][Debug] Thread monitor RestockText dimulai.")
+
+        while true do
+            local label = GetRestockLabel()
+            if label then
+                local ok, text = pcall(function() return label.ContentText end)
+                if ok and text then
+                    local remaining = ParseRemainingSeconds(text)
+                    if remaining then
+                        -- Deteksi restock: waktu tiba2 melompat naik jauh dari sebelumnya
+                        -- (misal dari 0:02 -> 4:59), artinya cycle baru dimulai
+                        if lastRemaining and remaining > lastRemaining + 60 then
+                            print("[BankShop][Debug] Restock terdeteksi! lastRemaining=" .. tostring(lastRemaining) .. " -> remaining=" .. tostring(remaining))
+                            if AutoBuyEnabled then
+                                TryBuySelected()
+                            end
+                        end
+                        lastRemaining = remaining
+                    end
+                else
+                    warn("[BankShop][Debug] Gagal baca ContentText RestockText: " .. tostring(text))
+                end
+            end
+            task.wait(1)
+        end
+    end)
+
+    Notify("Bank & Shop", "Module berhasil dimuat (inline mode)!", 3)
+    print("[BankShop][Debug] Inisialisasi Bank & Shop inline selesai.")
 end
