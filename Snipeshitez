@@ -34,13 +34,13 @@ local Context = SharedCore.Init(LunoLibrary)
 
 -- 4. Load & Init tiap fitur sebagai module terpisah
 -- URUTAN INI MENENTUKAN URUTAN SECTION DI TAB "Auto Farm":
--- Auto Job -> Property -> Daily Reward -> Daily/Weekly Task -> Auto Point Allocation
+-- Auto Job -> Auto Property -> Auto Point Allocation -> Daily Reward -> Daily/Weekly Task
 local FeatureModules = {
     { url = BASE_URL .. "JobModule.lua",         args = { JobsData.JOBS } },
     { url = BASE_URL .. "PropertyModule.lua",    args = { PropertiesData.PROPERTIES } },
+    { url = BASE_URL .. "AllocationModule.lua",  args = {} },
     { url = BASE_URL .. "DailyRewardModule.lua", args = {} },
     { url = BASE_URL .. "TaskModule.lua",        args = {} },
-    { url = BASE_URL .. "AllocationModule.lua",  args = {} },
     { url = BASE_URL .. "OperationModule.lua",   args = { OperationsData.OPERATIONS } },
 }
 
