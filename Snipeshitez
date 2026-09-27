@@ -428,9 +428,13 @@ end)
 -- AUTO OPERATIONS SYSTEM (TAB TERPISAH: "Operations")
 --
 -- === GUARD (ANTI SPAM COLLECT) ===
--- Sebelum invoke Collect, baca LANGSUNG dari UI game:
+-- Path per slot dibuat DINAMIS 1-4 via "Slot" .. slotIndex:
 --   PlayerGui.MafiaWarsUI.Root.Content.OpsPanel.SlotRow.Slot{N}.Progress.Value
--- ContentText-nya berisi countdown, contoh: "6:48 left"
+--
+-- === PENTING: HANYA CEK SLOT YANG SEDANG ENABLE ===
+-- Loop background (RunOperationSlotLoop) HANYA di-spawn untuk slot
+-- yang toggle-nya ON. Slot yang OFF sama sekali TIDAK disentuh
+-- (tidak baca UI, tidak invoke apapun) -> hemat CPU, gak ngelag.
 --
 -- Kalau waktu masih tersisa (>0 detik) -> SKIP TOTAL, gak invoke apapun.
 -- Kalau waktu habis / gak kebaca / slot kosong -> baru boleh Collect + Start.
@@ -483,7 +487,7 @@ local function ParseOperationTimeLeft(rawText)
     return nil
 end
 
--- ===== BACA NODE PROGRESS UNTUK SLOT TERTENTU =====
+-- ===== BACA NODE PROGRESS UNTUK SLOT TERTENTU (DINAMIS 1-4) =====
 local function GetSlotProgressNode(slotIndex)
     return SafeFindPath({
         "PlayerGui", "MafiaWarsUI", "Root", "Content",
@@ -554,6 +558,8 @@ OperationsTab:CreateDropdown({
 })
 
 -- ===== LOOP UTAMA PER SLOT (DENGAN GUARD UI) =====
+-- Loop ini CUMA di-spawn kalau slot.AutoEnabled = true (lihat toggle callback di bawah).
+-- Selama toggle OFF, slot ini TIDAK PERNAH dicek/dibaca sama sekali.
 local function RunOperationSlotLoop(slotIndex)
     local slot = OperationSlotState[slotIndex]
 
@@ -648,6 +654,7 @@ for slotIndex = 1, 4 do
                     Duration = 3
                 })
 
+                -- Cegah dobel spawn coroutine untuk slot yang sama
                 if not slot.Running then
                     slot.Running = true
                     task.spawn(function()
@@ -655,6 +662,8 @@ for slotIndex = 1, 4 do
                     end)
                 end
             end
+            -- Kalau Value == false, loop yang sedang jalan akan otomatis
+            -- keluar sendiri di iterasi berikutnya karena "while slot.AutoEnabled do"
         end
     })
 
@@ -663,70 +672,77 @@ end
 
 -- =========================================================
 -- DEBUG TOOLS (BUAT CEK PATH & VALUE MENTAH)
+-- HANYA CEK SLOT YANG SEDANG ENABLE (AutoEnabled = true)
+-- Slot yang OFF di-skip total, gak dibaca UI-nya sama sekali.
 -- =========================================================
 OperationsTab:CreateSection("Debug Tools")
 
 OperationsTab:CreateButton({
-    Title = "🔍 Debug Check Operations Status",
+    Title = "🔍 Debug Check Active Operation Slots",
     Callback = function()
         print("=========================================")
-        print("[DEBUG] OPERATIONS STATUS CHECK")
+        print("[DEBUG] ACTIVE OPERATION SLOTS CHECK")
+        print("[DEBUG] (Hanya slot yang Enable-nya ON)")
         print("=========================================")
 
         local summaryLines = {}
+        local activeCount = 0
 
         for i = 1, 4 do
-            local node = GetSlotProgressNode(i)
+            local slotState = OperationSlotState[i]
 
-            if not node then
-                local line = "Slot " .. i .. ": NODE NOT FOUND (path salah/slot gak ada di UI)"
+            if not slotState.AutoEnabled then
+                -- SKIP TOTAL: slot ini OFF, tidak dibaca UI-nya sama sekali
+                local line = "Slot " .. i .. ": OFF (di-skip, tidak dicek)"
                 print("[DEBUG] " .. line)
                 table.insert(summaryLines, line)
             else
-                local rawText = GetRawTextFromNode(node)
-                local parsedSeconds = ParseOperationTimeLeft(rawText)
+                activeCount = activeCount + 1
+                local node = GetSlotProgressNode(i)
 
-                local statusText
-                if parsedSeconds == nil then
-                    statusText = "UNKNOWN/EMPTY (aman utk collect)"
-                elseif parsedSeconds > 0 then
-                    statusText = "RUNNING (" .. parsedSeconds .. "s left)"
+                if not node then
+                    local line = "Slot " .. i .. " [ENABLED]: NODE NOT FOUND (path salah/UI belum kebuka)"
+                    print("[DEBUG] " .. line)
+                    table.insert(summaryLines, line)
                 else
-                    statusText = "READY TO COLLECT"
+                    local rawText = GetRawTextFromNode(node)
+                    local parsedSeconds = ParseOperationTimeLeft(rawText)
+
+                    local statusText
+                    if parsedSeconds == nil then
+                        statusText = "UNKNOWN/EMPTY (aman utk collect)"
+                    elseif parsedSeconds > 0 then
+                        statusText = "RUNNING (" .. parsedSeconds .. "s left)"
+                    else
+                        statusText = "READY TO COLLECT"
+                    end
+
+                    local line = "Slot " .. i .. " [ENABLED]: Raw=\"" .. tostring(rawText) .. "\" | Parsed=" .. tostring(parsedSeconds) .. "s | Status=" .. statusText
+
+                    print("[DEBUG] " .. line)
+                    print("[DEBUG]   -> Node Path: " .. node:GetFullName())
+                    print("[DEBUG]   -> Selected OpId: " .. tostring(slotState.OpId))
+
+                    table.insert(summaryLines, "Slot " .. i .. ": " .. statusText)
                 end
-
-                local line = "Slot " .. i .. ": Raw=\"" .. tostring(rawText) .. "\" | Parsed=" .. tostring(parsedSeconds) .. "s | Status=" .. statusText
-
-                print("[DEBUG] " .. line)
-                print("[DEBUG]   -> Node Path: " .. node:GetFullName())
-                print("[DEBUG]   -> Node ClassName: " .. node.ClassName)
-
-                local slotState = OperationSlotState[i]
-                print("[DEBUG]   -> AutoEnabled: " .. tostring(slotState.AutoEnabled) .. " | Selected OpId: " .. tostring(slotState.OpId))
-
-                table.insert(summaryLines, "Slot " .. i .. ": " .. statusText)
             end
         end
 
         print("=========================================")
+        print("[DEBUG] Total Active Slots Checked: " .. activeCount .. " / 4")
         print("[DEBUG] LEVEL & BARS STATUS")
-        print("=========================================")
         print("[DEBUG] Level: " .. tostring(CurrentDetectedLevel))
         print("[DEBUG] Energy: " .. tostring(CurrentEnergy) .. "/" .. tostring(MaxEnergy))
         print("[DEBUG] Stamina: " .. tostring(CurrentStamina) .. "/" .. tostring(MaxStamina))
         print("[DEBUG] Health: " .. tostring(CurrentHealth) .. "/" .. tostring(MaxHealth))
         print("=========================================")
 
-        local opsPanelRoot = SafeFindPath({"PlayerGui", "MafiaWarsUI", "Root", "Content", "OpsPanel"})
-        if not opsPanelRoot then
-            print("[DEBUG] WARNING: OpsPanel root TIDAK DITEMUKAN. Kemungkinan UI belum kebuka atau path berubah.")
-            table.insert(summaryLines, "⚠️ OpsPanel root tidak ditemukan!")
-        else
-            print("[DEBUG] OpsPanel root ditemukan: " .. opsPanelRoot:GetFullName())
+        if activeCount == 0 then
+            table.insert(summaryLines, 1, "⚠️ Tidak ada slot yang Enable. Nyalakan toggle slot dulu.")
         end
 
         QueueNotify({
-            Title = "Debug Check Selesai",
+            Title = "Debug Check Selesai (" .. activeCount .. " Slot Aktif)",
             Content = table.concat(summaryLines, "\n") .. "\n\nCek Developer Console (F9) untuk detail lengkap.",
             Duration = 6
         })
