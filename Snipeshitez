@@ -1,5 +1,5 @@
 -- [[ AUTO JOB SCRIPT - LUNO / LYORA X UI ]] --
--- [[ OPTIMIZED FOR CLIENT CPU (ANTI FREEZE/LAG DI HP/PC/TABLET) ]] --
+-- [[ OPTIMIZED FOR CLIENT CPU + UI-BASED OPERATION GUARD ]] --
 
 -- 1. Load Library Lyora X
 local LibraryUrl = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
@@ -61,11 +61,6 @@ end
 
 -- =========================================================
 -- UNIFIED SCHEDULER (ANTI-LAG SYSTEM)
--- Mengganti banyak "task.spawn + while true + task.wait"
--- dengan SATU Heartbeat loop yang atur semua timer.
--- Setiap callback yang due di-spawn terpisah (non-blocking)
--- + ada debounce (busy flag) supaya invoke tidak numpuk
--- kalau remote lagi lambat respon.
 -- =========================================================
 local Scheduler = {}
 Scheduler.Tasks = {}
@@ -102,16 +97,12 @@ end)
 
 -- =========================================================
 -- NOTIFY THROTTLE (ANTI SPAM UI / ANTI FRAME FREEZE)
--- Mencegah banyak Notify() nembak bersamaan dalam 1 frame.
--- Antrian + jeda antar notif = render UI gak numpuk.
 -- =========================================================
 local NotifyQueue = {}
 local NotifyProcessing = false
 
 local function QueueNotify(data)
-    -- Duration diperpendek dikit biar UI gak lama nahan instance
     data.Duration = data.Duration or 2.5
-
     table.insert(NotifyQueue, data)
 
     if not NotifyProcessing then
@@ -141,22 +132,33 @@ local function SafeFindPath(pathParts)
     return current
 end
 
-local function ReadNodeValue(node)
-    if not node then return 0, 0, "N/A" end
-
-    local rawValue = "N/A"
+local function GetRawTextFromNode(node)
+    if not node then return nil end
 
     local attrValue = node:GetAttribute("ContentText")
     if attrValue ~= nil then
-        rawValue = tostring(attrValue)
-    elseif node:IsA("ValueBase") then
-        rawValue = tostring(node.Value)
+        return tostring(attrValue)
     elseif node:IsA("TextLabel") or node:IsA("TextButton") then
-        rawValue = node.Text
+        return node.Text
     else
         local childText = node:FindFirstChildOfClass("TextLabel")
         if childText then
-            rawValue = childText.Text
+            return childText.Text
+        end
+    end
+
+    return nil
+end
+
+local function ReadNodeValue(node)
+    if not node then return 0, 0, "N/A" end
+
+    local rawValue = GetRawTextFromNode(node)
+    if rawValue == nil then
+        if node:IsA("ValueBase") then
+            rawValue = tostring(node.Value)
+        else
+            rawValue = "N/A"
         end
     end
 
@@ -197,16 +199,12 @@ local function SetupLevelListener()
 
     UpdateLevel()
 
-    -- EVENT-DRIVEN: update real-time cuma pas value berubah (hemat CPU)
     levelBadge:GetAttributeChangedSignal("ContentText"):Connect(UpdateLevel)
 
     local childText = levelBadge:FindFirstChildOfClass("TextLabel")
     if childText then
         childText:GetPropertyChangedSignal("Text"):Connect(UpdateLevel)
     end
-
-    -- TIDAK ADA polling loop terpisah di sini lagi.
-    -- Fallback poll digabung ke Scheduler di bawah (interval besar).
 end
 
 SetupLevelListener()
@@ -258,7 +256,6 @@ local function SetupBarListener(pathParts, updateCallback, refKey)
 
     DoUpdate()
 
-    -- EVENT-DRIVEN: cuma update pas berubah, gak polling terus
     node:GetAttributeChangedSignal("ContentText"):Connect(DoUpdate)
 
     if node:IsA("ValueBase") then
@@ -269,8 +266,6 @@ local function SetupBarListener(pathParts, updateCallback, refKey)
     if childText then
         childText:GetPropertyChangedSignal("Text"):Connect(DoUpdate)
     end
-
-    -- TIDAK ADA polling loop terpisah lagi di sini.
 end
 
 SetupBarListener(EnergyPath, function(val, maxVal)
@@ -288,8 +283,6 @@ SetupBarListener(HealthPath, function(val, maxVal)
     MaxHealth = maxVal
 end, "Health")
 
--- Fallback poll GABUNGAN (Level + 3 Bars jadi 1 task, interval besar)
--- Ini cuma jaring pengaman kalau event listener kelewatan/gagal fire.
 Scheduler:Add("StateFallbackPoll", 5, function()
     if LevelNodeRef and LevelNodeRef.Parent then
         CurrentDetectedLevel = ReadNodeValue(LevelNodeRef)
@@ -367,7 +360,7 @@ local function ForceSetToggleOff(toggleObject, flagName)
 end
 
 -- =========================================================
--- AUTO JOB CONFIGURATIONS (LOGIC: CEK LEVEL -> CEK ENERGY)
+-- AUTO JOB CONFIGURATIONS
 -- =========================================================
 MainTab:CreateSection("Auto Job Configurations")
 
@@ -413,7 +406,6 @@ MainTab:CreateDropdown({
     end
 })
 
--- Auto Job masuk Scheduler (interval 1s)
 Scheduler:Add("AutoJob", 1, function()
     if not AutoJobEnabled then return end
 
@@ -434,8 +426,16 @@ end)
 
 -- =========================================================
 -- AUTO OPERATIONS SYSTEM (TAB TERPISAH: "Operations")
--- Coroutine per slot (durasi lama, gak perlu Scheduler heartbeat)
--- Wait chunk dinaikkan ke 10s biar jarang "bangun" -> hemat CPU
+--
+-- === GUARD BARU (ANTI SPAM COLLECT) ===
+-- Sebelum invoke Collect, baca LANGSUNG dari UI game:
+--   PlayerGui.MafiaWarsUI.Root.Content.OpsPanel.SlotRow.Slot{N}.Progress.Value
+-- ContentText-nya berisi countdown, contoh: "6:48 left"
+--
+-- Kalau waktu masih tersisa (>0 detik) -> SKIP TOTAL, gak invoke apapun.
+-- Kalau waktu habis / gak kebaca / slot kosong -> baru boleh Collect + Start.
+-- Ini jauh lebih akurat dibanding timer lokal karena baca real-time
+-- dari state UI yang sebenarnya (anti drift, anti spam invoke).
 -- =========================================================
 local StartOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("StartOperation")
 local CollectOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("CollectOperation")
@@ -451,6 +451,72 @@ for i = 1, 4 do
         OpId = OPERATIONS[1].id,
         ToggleRef = nil,
     }
+end
+
+-- ===== PARSER WAKTU DARI UI (SUPPORT BANYAK FORMAT) =====
+local function ParseOperationTimeLeft(rawText)
+    if not rawText then return nil end
+    local text = tostring(rawText):lower()
+
+    -- Kalau ada keyword yang menandakan siap diklaim
+    if string.find(text, "ready") or string.find(text, "collect") or string.find(text, "claim") or string.find(text, "complete") or string.find(text, "done") then
+        return 0
+    end
+
+    -- Format H:MM:SS (contoh: "15:59:59 left")
+    local h, m, s = string.match(text, "(%d+):(%d+):(%d+)")
+    if h and m and s then
+        return tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(s)
+    end
+
+    -- Format M:SS (contoh: "6:48 left")
+    local m2, s2 = string.match(text, "(%d+):(%d+)")
+    if m2 and s2 then
+        return tonumber(m2) * 60 + tonumber(s2)
+    end
+
+    -- Format "Xh Ym" (contoh: "3h 20m left")
+    local hh, mm = string.match(text, "(%d+)h%s*(%d+)m")
+    if hh and mm then
+        return tonumber(hh) * 3600 + tonumber(mm) * 60
+    end
+
+    -- Format "Xm" saja (contoh: "45m left")
+    local mmOnly = string.match(text, "(%d+)m")
+    if mmOnly then
+        return tonumber(mmOnly) * 60
+    end
+
+    -- Gak kebaca formatnya sama sekali
+    return nil
+end
+
+-- ===== BACA NODE PROGRESS UNTUK SLOT TERTENTU =====
+local function GetSlotProgressNode(slotIndex)
+    return SafeFindPath({
+        "PlayerGui", "MafiaWarsUI", "Root", "Content",
+        "OpsPanel", "SlotRow", "Slot" .. slotIndex, "Progress", "Value"
+    })
+end
+
+-- ===== FUNGSI UTAMA GUARD: DAPATKAN SISA WAKTU SLOT =====
+-- Return: (seconds, rawText)
+--   seconds > 0  -> masih berjalan, JANGAN collect
+--   seconds == 0 -> siap diklaim
+--   seconds nil  -> gak kebaca / slot kosong -> aman untuk dicoba collect
+local function GetSlotTimeLeft(slotIndex)
+    local node = GetSlotProgressNode(slotIndex)
+    if not node then
+        return nil, "NO_NODE"
+    end
+
+    local rawText = GetRawTextFromNode(node)
+    if not rawText or rawText == "" or rawText == "N/A" then
+        return nil, "NO_TEXT"
+    end
+
+    local seconds = ParseOperationTimeLeft(rawText)
+    return seconds, rawText
 end
 
 local function TryStartOperation(opId)
@@ -499,45 +565,57 @@ OperationsTab:CreateDropdown({
     end
 })
 
+-- ===== LOOP UTAMA PER SLOT (DENGAN GUARD UI) =====
 local function RunOperationSlotLoop(slotIndex)
     local slot = OperationSlotState[slotIndex]
 
     while slot.AutoEnabled do
-        local collectSuccess, collectResult = TryCollectOperation(slotIndex)
-        if collectSuccess then
-            QueueNotify({
-                Title = "Operation Collected!",
-                Content = "Slot " .. slotIndex .. " reward diklaim.\nCash: " .. tostring(collectResult.cash) .. " | XP: " .. tostring(collectResult.xp),
-                Duration = 3
-            })
-        end
+        local timeLeft, rawInfo = GetSlotTimeLeft(slotIndex)
 
-        if not slot.AutoEnabled then break end
-
-        local opInfo = OPERATIONS_BY_ID[slot.OpId]
-
-        if not opInfo then
-            task.wait(10)
+        if timeLeft and timeLeft > 0 then
+            -- ===== GUARD UTAMA =====
+            -- Operation masih berjalan (dibaca langsung dari UI game).
+            -- JANGAN invoke Collect/Start sama sekali, cuma tunggu.
+            -- Chunk max 10 detik biar tetap responsif kalau di-OFF di tengah.
+            local waitChunk = math.min(10, timeLeft)
+            task.wait(waitChunk)
         else
-            local startSuccess = TryStartOperation(slot.OpId)
+            -- timeLeft == 0 (siap collect) ATAU nil (gak kebaca / slot kosong)
+            -- Baru di titik ini boleh coba Collect.
+            local collectSuccess, collectResult = TryCollectOperation(slotIndex)
 
-            if startSuccess then
+            if collectSuccess then
                 QueueNotify({
-                    Title = "Operation Started",
-                    Content = "Slot " .. slotIndex .. ": " .. opInfo.name .. " (" .. FormatDuration(opInfo.duration) .. ")",
+                    Title = "Operation Collected!",
+                    Content = "Slot " .. slotIndex .. " reward diklaim.\nCash: " .. tostring(collectResult.cash) .. " | XP: " .. tostring(collectResult.xp),
                     Duration = 3
                 })
+            end
 
-                -- Wait chunk dinaikkan ke 10 detik (dari 5) biar coroutine jarang "bangun" -> hemat CPU
-                -- Tetap responsif kalau di-OFF di tengah jalan (maks delay 10 detik)
-                local waited = 0
-                while waited < opInfo.duration and slot.AutoEnabled do
-                    local chunk = math.min(10, opInfo.duration - waited)
-                    task.wait(chunk)
-                    waited = waited + chunk
-                end
-            else
+            if not slot.AutoEnabled then break end
+
+            local opInfo = OPERATIONS_BY_ID[slot.OpId]
+
+            if not opInfo then
                 task.wait(10)
+            else
+                local startSuccess = TryStartOperation(slot.OpId)
+
+                if startSuccess then
+                    QueueNotify({
+                        Title = "Operation Started",
+                        Content = "Slot " .. slotIndex .. ": " .. opInfo.name .. " (" .. FormatDuration(opInfo.duration) .. ")",
+                        Duration = 3
+                    })
+
+                    -- Kasih jeda biar UI Progress sempat update ke countdown baru
+                    -- sebelum dicek lagi di iterasi berikutnya (cegah collect prematur)
+                    task.wait(3)
+                else
+                    -- Gagal start (requirement kurang / slot server masih dipakai job lain)
+                    -- Guard delay biar gak spam invoke terus-terusan.
+                    task.wait(8)
+                end
             end
         end
     end
@@ -584,7 +662,7 @@ for slotIndex = 1, 4 do
                 local opInfo = OPERATIONS_BY_ID[slot.OpId]
                 QueueNotify({
                     Title = "Auto Slot " .. slotIndex .. " Started",
-                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih"),
+                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih") .. "\nMengecek status via UI dulu...",
                     Duration = 3
                 })
 
