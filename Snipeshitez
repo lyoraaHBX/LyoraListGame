@@ -63,25 +63,41 @@ end
     CREW UPGRADE (INLINE - TIDAK DIPISAH JADI MODULE)
     Tab sendiri: "Crew Upgrade"
 
-    LOGIC "SELESAI" UNTUK SATU SLOT (2 KONDISI, mana saja duluan):
-      1. EXACT MATCH  -> rarity yang didapat PERSIS SAMA dengan
-                          Target Rarity yang dipilih user.
-      2. KEEP RARITY  -> rarity yang didapat SUDAH >= Keep Rarity
-                          (safety net). Ini dianggap "hoki" / terlalu
-                          bagus untuk dilepas, jadi otomatis di-STOP
-                          & disimpan walau bukan target yang diminta.
+    LOGIC "SELESAI" UNTUK SATU SLOT (2 kondisi, mana saja duluan):
+      1. EXACT MATCH  -> rarity PERSIS SAMA dengan Target Rarity.
+      2. KEEP RARITY  -> rarity SUDAH >= Keep Rarity (safety net,
+                          dianggap "hoki", auto stop & disimpan).
 
-      Contoh: Target = Uncommon(2), Keep Rarity = Forbidden(8)
-        - Dapet Rare(3)      -> BELUM selesai (reroll terus)
-        - Dapet Uncommon(2)  -> SELESAI (exact match target)
-        - Dapet Forbidden(8) -> SELESAI (kena Keep Rarity, di-keep)
+    ROLL MODE (3 pilihan):
+      1. Replace One By One  -> proses semua slot, 1 per 1, sampai
+                                 masing2 capai target, baru lanjut.
+      2. Replace All At Once -> semua slot direroll bergantian
+                                 per-putaran, slot yg selesai stop.
+      3. Single Slot Saja    -> HANYA 1 slot tertentu (dipilih user
+                                 lewat dropdown "Target Slot") yang
+                                 direroll terus sampai target, slot
+                                 lain tidak disentuh sama sekali.
 
-    SLOT DINAMIS:
-      Jumlah slot dibaca dari:
+    SLOT DINAMIS (dari UI HENCHMEN):
       PlayerGui.MafiaWarsUI.Root.Content.CrewPanel.SummaryRow.BadgeMembers
       Format: "16 OF 16 HENCHMEN" -> slot 2..16
-      Kalau HENCHMEN nambah di tengah proses, slot baru otomatis
-      ikut diproses tanpa perlu restart toggle.
+      - Mode One By One & All At Once: otomatis re-scan jumlah
+        HENCHMEN tiap kali idle (tidak butuh dropdown khusus).
+      - Mode Single Slot: dropdown "Target Slot" di-refresh SENDIRI
+        (terpisah) setiap kali jumlah HENCHMEN berubah, tidak
+        mempengaruhi dropdown/logic lain.
+
+    ROLL SPEED:
+      Slow   -> delay 0.6s per aksi
+      Normal -> delay 0.35s per aksi
+      Fast   -> delay 0.15s per aksi
+
+    AUTO EXPAND CREW SLOT:
+      Spam invoke "buyslot" terus menerus. Kalau hasilnya:
+        { ok = true, cost = ... }          -> lanjut beli lagi
+        { ok = false, msg = "..." }        -> STOP, toggle di-
+                                               matikan otomatis
+                                               (logic & visual OFF)
 
     Rarity Mapping (Urut Rendah -> Tinggi):
       Common=1, Uncommon=2, Rare=3, Epic=4,
@@ -129,23 +145,34 @@ do
 
         local RarityOptions = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Secret", "Forbidden"}
 
+        local SpeedPresets = {
+            ["Slow"]   = 0.6,
+            ["Normal"] = 0.35,
+            ["Fast"]   = 0.15,
+        }
+
         ------------------------------------------------------------
         -- STATE
         ------------------------------------------------------------
         local Settings = {
-            RollMode     = "OneByOne", -- "OneByOne" atau "AllAtOnce"
-            HireTier     = "street",
-            MinRarity    = RarityNameToValue["Common"],    -- Target Rarity (exact match)
-            KeepRarity   = RarityNameToValue["Forbidden"], -- Safety net (>= ini = auto keep)
-            ActionDelay  = 0.35,
+            RollMode          = "OneByOne", -- "OneByOne" / "AllAtOnce" / "SingleSlot"
+            HireTier          = "street",
+            MinRarity         = RarityNameToValue["Common"],
+            KeepRarity        = RarityNameToValue["Forbidden"],
+            ActionDelay       = SpeedPresets["Normal"],
             MaxAttemptsPerSlot = 500,
             MaxConsecutiveFailNotify = 10,
-            RecheckIdleDelay = 2,
+            RecheckIdleDelay  = 2,
+            TargetSlotSingle  = 2, -- dipakai untuk mode "Single Slot Saja"
         }
 
         local RollRunning = false
         local StopRollRequested = false
+
         local EquipRunning = false
+
+        local ExpandRunning = false
+        local StopExpandRequested = false
 
         -- Menyimpan rarity terakhir yang kita ketahui per slot
         local KnownSlotRarity = {}
@@ -229,6 +256,18 @@ do
             return slots
         end
 
+        local function GetSlotOptionsAsStrings()
+            local slots = GetCrewSlots()
+            local opts = {}
+            for _, s in ipairs(slots) do
+                table.insert(opts, tostring(s))
+            end
+            if #opts == 0 then
+                opts = {"2"}
+            end
+            return opts
+        end
+
         ------------------------------------------------------------
         -- HELPER: Safe Invoke
         ------------------------------------------------------------
@@ -249,6 +288,10 @@ do
             return SafeInvoke(ACTION_HASH, "hire", hireType, nil, nil)
         end
 
+        local function BuySlot()
+            return SafeInvoke(ACTION_HASH, "buyslot", nil, nil, nil)
+        end
+
         local function ExtractResult(packedResult)
             if packedResult and packedResult[1] and type(packedResult[1]) == "table" then
                 local data = packedResult[1]
@@ -260,9 +303,16 @@ do
             return false, nil, nil, nil
         end
 
+        local function ExtractBuySlotResult(packedResult)
+            if packedResult and packedResult[1] and type(packedResult[1]) == "table" then
+                local data = packedResult[1]
+                return data.ok, data.cost, data.msg
+            end
+            return nil, nil, nil
+        end
+
         ------------------------------------------------------------
         -- CEK APAKAH SLOT SUDAH DIPROTEKSI (dari rarity yang sudah diketahui)
-        -- Dipakai untuk skip slot yang sudah "kept" di awal pemrosesan.
         ------------------------------------------------------------
         local function IsSlotProtected(slot)
             local knownRarity = KnownSlotRarity[slot]
@@ -274,7 +324,6 @@ do
 
         ------------------------------------------------------------
         -- CEK APAKAH RARITY TERTENTU SUDAH "SELESAI" (target/keep)
-        -- Return: isDone (bool), reason ("target" / "kept" / nil)
         ------------------------------------------------------------
         local function CheckIsDone(rarity)
             if rarity == Settings.MinRarity then
@@ -309,7 +358,6 @@ do
 
         ------------------------------------------------------------
         -- REROLL 1 SLOT SAMPAI SELESAI (EXACT MATCH ATAU KEEP RARITY)
-        -- Return: reached (bool), reason ("target"/"kept"/"maxattempts")
         ------------------------------------------------------------
         local function RerollSlotUntilTarget(slot)
             local attempts = 0
@@ -333,7 +381,6 @@ do
                     end
                 else
                     consecutiveFails = 0
-
                     local isDone, reason = CheckIsDone(rarity)
                     if isDone then
                         return true, reason
@@ -453,6 +500,50 @@ do
         end
 
         ------------------------------------------------------------
+        -- MODE: SINGLE SLOT SAJA
+        -- Hanya reroll 1 slot yang dipilih user, tidak menyentuh
+        -- slot lain sama sekali, tidak auto-extend ke slot lain.
+        ------------------------------------------------------------
+        local function RunRollSingleSlot()
+            local slot = Settings.TargetSlotSingle
+
+            if not slot then
+                LunoLibrary:Notify({Title = "Error", Content = "Pilih Target Slot terlebih dahulu!", Duration = 2})
+                return
+            end
+
+            local validSlots = GetCrewSlots()
+            local isValid = false
+            for _, s in ipairs(validSlots) do
+                if s == slot then
+                    isValid = true
+                    break
+                end
+            end
+
+            if not isValid then
+                LunoLibrary:Notify({Title = "Error", Content = "Slot " .. tostring(slot) .. " tidak tersedia saat ini.", Duration = 2.5})
+                return
+            end
+
+            if IsSlotProtected(slot) then
+                LunoLibrary:Notify({Title = "Slot " .. slot .. " Dilewati", Content = "Sudah memenuhi Keep Rarity sebelumnya.", Duration = 2})
+                return
+            end
+
+            local reached, reason = RerollSlotUntilTarget(slot)
+            if reached then
+                if reason == "kept" then
+                    LunoLibrary:Notify({Title = "Slot " .. slot .. " Selesai (Kept)", Content = "Rarity >= Keep Rarity tercapai!", Duration = 2.5})
+                else
+                    LunoLibrary:Notify({Title = "Slot " .. slot .. " Selesai", Content = "Target Rarity tercapai persis!", Duration = 2.5})
+                end
+            elseif not StopRollRequested then
+                LunoLibrary:Notify({Title = "Slot " .. slot .. " Dilewati", Content = "Batas maksimal percobaan tercapai.", Duration = 2.5})
+            end
+        end
+
+        ------------------------------------------------------------
         -- MAIN RUNNER TOGGLE: Auto Roll Crew Rarity
         ------------------------------------------------------------
         local function StartAutoRoll()
@@ -463,6 +554,8 @@ do
             task.spawn(function()
                 if Settings.RollMode == "AllAtOnce" then
                     RunRollAllAtOnce()
+                elseif Settings.RollMode == "SingleSlot" then
+                    RunRollSingleSlot()
                 else
                     RunRollOneByOne()
                 end
@@ -486,8 +579,6 @@ do
         local function TryEquipBestGearOnce()
             local slots = GetCrewSlots()
             for _, slot in ipairs(slots) do
-                -- TODO: Ganti "equip_best_gear" dengan action name yang benar,
-                -- dan sesuaikan argumen (slot, gearId, dsb) sesuai remote asli game.
                 SafeInvoke(ACTION_HASH, "equip_best_gear", slot, nil, nil)
                 task.wait(0.2)
             end
@@ -507,6 +598,60 @@ do
 
         local function StopAutoEquip()
             EquipRunning = false
+        end
+
+        ------------------------------------------------------------
+        -- AUTO EXPAND CREW SLOT
+        -- Terus beli slot baru sampai server balikin ok=false
+        -- (biasanya karena uang tidak cukup atau limit tercapai).
+        -- Setelah gagal, toggle WAJIB mati (logic + visual OFF).
+        ------------------------------------------------------------
+        local function StartAutoExpand()
+            if ExpandRunning then return end
+            ExpandRunning = true
+            StopExpandRequested = false
+
+            task.spawn(function()
+                while not StopExpandRequested do
+                    local result = BuySlot()
+                    local ok, cost, msg = ExtractBuySlotResult(result)
+
+                    if ok == true then
+                        LunoLibrary:Notify({
+                            Title = "Auto Expand Slot",
+                            Content = "Slot baru berhasil dibeli! Cost: $" .. tostring(cost),
+                            Duration = 2
+                        })
+                        task.wait(Settings.ActionDelay)
+                    elseif ok == false then
+                        LunoLibrary:Notify({
+                            Title = "Auto Expand Slot Berhenti",
+                            Content = msg or "Tidak bisa membeli slot baru lagi.",
+                            Duration = 4
+                        })
+                        break
+                    else
+                        LunoLibrary:Notify({
+                            Title = "Auto Expand Slot Error",
+                            Content = "Invoke gagal / invalid, mencoba lagi...",
+                            Duration = 1.5
+                        })
+                        task.wait(1)
+                    end
+                end
+
+                ExpandRunning = false
+                StopExpandRequested = false
+
+                -- WAJIB: matikan toggle (logic & visual OFF) setelah selesai/gagal
+                if LunoLibrary.Elements and LunoLibrary.Elements["CrewAutoExpandSlot"] then
+                    pcall(function() LunoLibrary.Elements["CrewAutoExpandSlot"].Set(false) end)
+                end
+            end)
+        end
+
+        local function StopAutoExpand()
+            StopExpandRequested = true
         end
 
         ------------------------------------------------------------
@@ -540,15 +685,37 @@ do
 
         CrewTab:CreateDropdown({
             Title = "Roll Mode",
-            Options = {"Replace One By One", "Replace All At Once"},
+            Options = {"Replace One By One", "Replace All At Once", "Single Slot Saja"},
             Default = "Replace One By One",
             Flag = "CrewRollMode",
             Callback = function(Value)
                 if Value == "Replace All At Once" then
                     Settings.RollMode = "AllAtOnce"
+                elseif Value == "Single Slot Saja" then
+                    Settings.RollMode = "SingleSlot"
                 else
                     Settings.RollMode = "OneByOne"
                 end
+            end
+        })
+
+        local SlotDropdownObj = CrewTab:CreateDropdown({
+            Title = "Target Slot (Khusus Mode: Single Slot Saja)",
+            Options = GetSlotOptionsAsStrings(),
+            Default = tostring(Settings.TargetSlotSingle),
+            Flag = "CrewTargetSlotSingle",
+            Callback = function(Value)
+                Settings.TargetSlotSingle = tonumber(Value)
+            end
+        })
+
+        CrewTab:CreateDropdown({
+            Title = "Roll Speed",
+            Options = {"Slow", "Normal", "Fast"},
+            Default = "Normal",
+            Flag = "CrewRollSpeed",
+            Callback = function(Value)
+                Settings.ActionDelay = SpeedPresets[Value] or 0.35
             end
         })
 
@@ -581,6 +748,39 @@ do
                 Settings.KeepRarity = RarityNameToValue[Value] or 8
             end
         })
+
+        CrewTab:CreateToggle({
+            Title = "Auto Expand Crew Slot",
+            Default = false,
+            Flag = "CrewAutoExpandSlot",
+            Callback = function(State)
+                if State then
+                    StartAutoExpand()
+                else
+                    StopAutoExpand()
+                end
+            end
+        })
+
+        ------------------------------------------------------------
+        -- BACKGROUND WATCHER: Auto-refresh KHUSUS dropdown "Target Slot"
+        -- ketika jumlah HENCHMEN berubah. Tidak mempengaruhi mode lain
+        -- karena One By One & All At Once sudah scan slot sendiri
+        -- secara realtime lewat GetCrewSlots().
+        ------------------------------------------------------------
+        task.spawn(function()
+            local lastSlotCount = #GetCrewSlots()
+            while true do
+                task.wait(3)
+                local currentSlots = GetCrewSlots()
+                if #currentSlots ~= lastSlotCount then
+                    lastSlotCount = #currentSlots
+                    if SlotDropdownObj then
+                        SlotDropdownObj.Refresh(GetSlotOptionsAsStrings())
+                    end
+                end
+            end
+        end)
     else
         warn("[CrewUpgrade] Gagal menemukan CrewAction Remote.")
     end
