@@ -433,8 +433,9 @@ do
 end
 
 --======================================================================
--- [[ CREW SYSTEM - INLINE (DEBUG MODE) ]]
--- Auto Buy Slot, Auto Hire, Auto Reroll (Dismiss + Hire sampai Rarity target)
+-- [[ CREW SYSTEM (FULL, GABUNGAN) - INLINE (DEBUG MODE) ]]
+-- Auto Buy Slot, Auto Hire, Auto Reroll ALL SLOT (dari slot 2 sampai habis),
+-- + Info Jumlah Crew & Detail List Member (gabungan dari Crew Upgrade lama)
 -- Menggunakan CrewAction remote & hash yang SAMA PERSIS dengan Deposit/BuyShopItem
 --======================================================================
 do
@@ -524,6 +525,39 @@ do
         return count
     end
 
+    -- Scan detail tiap member (fallback: kumpulkan semua TextLabel di dalam frame Member_X)
+    local function GetMemberInfo(memberFrame)
+        local info = { raw = {} }
+        for _, child in ipairs(memberFrame:GetDescendants()) do
+            if child:IsA("TextLabel") and child.Text and #child.Text > 0 then
+                table.insert(info.raw, child.Text)
+            end
+        end
+        return info
+    end
+
+    local function ScanAllMembers()
+        local scroller = GetCrewScroller()
+        local members = {}
+
+        if not scroller then
+            return members
+        end
+
+        for i = 1, MAX_SLOT_CAP do
+            local memberFrame = scroller:FindFirstChild("Member_" .. i)
+            if memberFrame then
+                local info = GetMemberInfo(memberFrame)
+                info.index = i
+                table.insert(members, info)
+            else
+                break
+            end
+        end
+
+        return members
+    end
+
     -----------------------------------------------------------------
     -- Low level action wrapper
     -----------------------------------------------------------------
@@ -539,6 +573,91 @@ do
 
         return result and result[1]
     end
+
+    -----------------------------------------------------------------
+    -- SECTION: INFO CREW (Live Count) - Digabung dari Crew Upgrade lama
+    -----------------------------------------------------------------
+    Tab:CreateSection("Info Crew Saat Ini")
+
+    Tab:CreateInput({
+        Title = "Jumlah Crew (Live)",
+        Placeholder = "Menghitung...",
+        Callback = function() end, -- readonly, user gak perlu input apa2
+    })
+
+    local LastCrewCount = -1
+
+    local function RefreshCrewInfo(showNotify)
+        local members = ScanAllMembers()
+        local count = #members
+
+        if showNotify or count ~= LastCrewCount then
+            Notify("Crew Info", ("Jumlah Crew: %d / %d slot"):format(count, MAX_SLOT_CAP), 3)
+        end
+
+        LastCrewCount = count
+        return members
+    end
+
+    Tab:CreateButton({
+        Title = "Refresh Info Jumlah Crew",
+        Callback = function()
+            RefreshCrewInfo(true)
+        end,
+    })
+
+    -----------------------------------------------------------------
+    -- SECTION: DETAIL LIST CREW - Digabung dari Crew Upgrade lama
+    -----------------------------------------------------------------
+    Tab:CreateSection("Detail Member Crew")
+
+    local CrewListUI = Tab:CreateScriptList()
+
+    local function RefreshCrewList()
+        local members = ScanAllMembers()
+
+        for _, memberInfo in ipairs(members) do
+            local titleText = "Slot " .. memberInfo.index
+            local descText = "-"
+
+            if memberInfo.raw and #memberInfo.raw > 0 then
+                descText = table.concat(memberInfo.raw, " | ")
+            end
+
+            CrewListUI:AddCard({
+                Title = titleText,
+                Description = descText,
+                Icon = "rbxassetid://6031763426",
+                Callback = function()
+                    Notify("Crew Detail", titleText .. " -> " .. descText, 4)
+                end,
+            })
+        end
+
+        print("[Crew][Debug] Refresh list crew, total: " .. #members)
+    end
+
+    Tab:CreateButton({
+        Title = "Refresh Detail List Crew",
+        Callback = function()
+            RefreshCrewList()
+        end,
+    })
+
+    -----------------------------------------------------------------
+    -- Auto-refresh info ringan tiap beberapa detik (background thread)
+    -----------------------------------------------------------------
+    task.spawn(function()
+        print("[Crew][Debug] Thread auto-refresh info crew dimulai.")
+        while true do
+            RefreshCrewInfo(false)
+            task.wait(5) -- cukup jarang biar gak spam notify & CPU tetap adem
+        end
+    end)
+
+    -- Panggil sekali di awal biar langsung ada info pas tab dibuka
+    RefreshCrewInfo(false)
+    RefreshCrewList()
 
     -----------------------------------------------------------------
     -- SECTION: AUTO BUY SLOT (EXPAND)
@@ -702,33 +821,21 @@ do
     })
 
     -----------------------------------------------------------------
-    -- SECTION: AUTO REROLL (Dismiss + Hire sampai Rarity target di slot tertentu)
+    -- SECTION: AUTO REROLL ALL SLOTS (FIXED LOGIC)
+    -- Mulai dari slot 2 sampai slot terakhir yang terdeteksi.
+    -- Tiap slot direroll (dismiss+hire) berulang sampai dapat rarity >= target,
+    -- baru lanjut ke slot berikutnya. Kalau semua slot sudah selesai, auto-stop.
     -----------------------------------------------------------------
-    Tab:CreateSection("Auto Reroll Crew (By Slot)")
-
-    local RerollSlotIndex = 1
-    Tab:CreateInput({
-        Title = "Slot yang Direroll (1-30)",
-        Placeholder = "1",
-        Callback = function(text)
-            local num = tonumber(text)
-            if num and num >= 1 and num <= MAX_SLOT_CAP then
-                RerollSlotIndex = math.floor(num)
-                print("[Crew][Debug] RerollSlotIndex diset ke: " .. RerollSlotIndex)
-            else
-                Notify("Crew - Reroll", "Slot tidak valid (harus 1-30)", 3)
-            end
-        end,
-    })
+    Tab:CreateSection("Auto Reroll Semua Slot (Mulai dari Slot 2)")
 
     local RarityOptions = {"1", "2", "3", "4", "5", "6", "7", "8"}
-    local TargetRarity = 8
+    local TargetRarity = 6
 
     Tab:CreateDropdown({
-        Title = "Target Rarity (Berhenti Jika Sesuai)",
+        Title = "Target Rarity Minimal (Per Slot)",
         Options = RarityOptions,
         Multi = false,
-        Default = "8",
+        Default = "6",
         Flag = "RerollTargetRarity",
         Callback = function(selected)
             local num = tonumber(selected)
@@ -744,6 +851,7 @@ do
     end
 
     local AutoRerollEnabled = false
+    local REROLL_START_SLOT = 2 -- fixed: mulai dari slot nomor 2 (slot 1 dilewati/dianggap starter)
 
     local function StopAutoReroll(reason)
         AutoRerollEnabled = false
@@ -758,7 +866,7 @@ do
     end
 
     Tab:CreateToggle({
-        Title = "Auto Reroll Sampai Rarity Sesuai Target",
+        Title = "Auto Reroll Semua Slot (2 s/d Habis) Sampai Rarity Target",
         Default = false,
         Flag = "AutoRerollEnabled",
         Callback = function(value)
@@ -768,277 +876,111 @@ do
                 return
             end
 
-            Notify("Crew - Auto Reroll", ("Mulai reroll slot %d, target rarity %d, tipe %s"):format(
-                RerollSlotIndex, TargetRarity, HireType
+            local totalSlot = CountExistingSlots()
+
+            if totalSlot < REROLL_START_SLOT then
+                Notify("Crew - Auto Reroll", ("Tidak ada slot untuk direroll (total slot saat ini: %d, minimal butuh slot %d)"):format(
+                    totalSlot, REROLL_START_SLOT
+                ), 4)
+                StopAutoReroll(nil)
+                return
+            end
+
+            Notify("Crew - Auto Reroll", ("Mulai reroll dari slot %d s/d %d, target rarity minimal %d, tipe %s"):format(
+                REROLL_START_SLOT, totalSlot, TargetRarity, HireType
             ), 3)
 
             task.spawn(function()
-                while AutoRerollEnabled do
-                    local dismissResult = DoDismiss(RerollSlotIndex)
+                local currentSlot = REROLL_START_SLOT
 
-                    if not dismissResult then
-                        StopAutoReroll("Gagal komunikasi dengan server saat dismiss, auto reroll dihentikan.")
-                        break
+                while AutoRerollEnabled and currentSlot <= totalSlot do
+                    print("[Crew][Debug] Mulai reroll slot ke-" .. currentSlot)
+                    Notify("Crew - Auto Reroll", "Sedang reroll slot " .. currentSlot .. "...", 2)
+
+                    local slotDone = false
+
+                    while AutoRerollEnabled and not slotDone do
+                        local dismissResult = DoDismiss(currentSlot)
+
+                        if not dismissResult then
+                            StopAutoReroll("Gagal komunikasi dengan server saat dismiss slot " .. currentSlot .. ", auto reroll dihentikan.")
+                            return
+                        end
+
+                        if not dismissResult.ok then
+                            -- Slot mungkin kosong (belum ada member), lanjut coba hire langsung
+                            print("[Crew][Debug] Dismiss gagal/slot kosong (slot " .. currentSlot .. "): " .. tostring(dismissResult.msg))
+                        else
+                            print("[Crew][Debug] Dismiss sukses (slot " .. currentSlot .. "): " .. tostring(dismissResult.msg))
+                        end
+
+                        task.wait(0.3)
+
+                        local hireResult = DoHire(HireType)
+
+                        if not hireResult then
+                            StopAutoReroll("Gagal komunikasi dengan server saat hire slot " .. currentSlot .. ", auto reroll dihentikan.")
+                            return
+                        end
+
+                        if not hireResult.ok then
+                            StopAutoReroll(hireResult.msg or ("Gagal hire saat reroll slot " .. currentSlot .. " (uang tidak cukup / slot penuh)."))
+                            return
+                        end
+
+                        local m = hireResult.member
+                        print(("[Crew][Debug] Hasil reroll slot %d: %s (Rarity %s) index=%s"):format(
+                            currentSlot, tostring(m and m.name), tostring(m and m.rarity), tostring(hireResult.index)
+                        ))
+
+                        if m and m.rarity and m.rarity >= TargetRarity then
+                            Notify("Crew - Auto Reroll", ("Slot %d selesai! %s (Rarity %s) >= target %d"):format(
+                                currentSlot, tostring(m.name), tostring(m.rarity), TargetRarity
+                            ), 3)
+                            slotDone = true
+                        else
+                            Notify("Crew - Auto Reroll", ("Slot %d: rarity %s belum sesuai target %d, ulangi..."):format(
+                                currentSlot, tostring(m and m.rarity), TargetRarity
+                            ), 1)
+                            task.wait(0.4)
+                        end
                     end
 
-                    if not dismissResult.ok then
-                        -- Slot mungkin sudah kosong (belum ada member), lanjut coba hire langsung
-                        print("[Crew][Debug] Dismiss gagal/slot kosong: " .. tostring(dismissResult.msg))
-                    else
-                        print("[Crew][Debug] Dismiss sukses: " .. tostring(dismissResult.msg))
+                    if not AutoRerollEnabled then
+                        -- Dihentikan manual di tengah proses
+                        return
                     end
 
-                    task.wait(0.3)
+                    currentSlot = currentSlot + 1
 
-                    local hireResult = DoHire(HireType)
+                    -- Re-scan total slot, in case jumlah slot berubah (misal auto buy slot jalan bareng)
+                    totalSlot = CountExistingSlots()
+                end
 
-                    if not hireResult then
-                        StopAutoReroll("Gagal komunikasi dengan server saat hire, auto reroll dihentikan.")
-                        break
-                    end
-
-                    if not hireResult.ok then
-                        StopAutoReroll(hireResult.msg or "Gagal hire saat reroll (uang tidak cukup / slot penuh).")
-                        break
-                    end
-
-                    local m = hireResult.member
-                    print(("[Crew][Debug] Reroll hasil: %s (Rarity %s) index=%s"):format(
-                        tostring(m and m.name), tostring(m and m.rarity), tostring(hireResult.index)
-                    ))
-
-                    if m and m.rarity and m.rarity == TargetRarity then
-                        Notify("Crew - Auto Reroll", ("Target tercapai! %s (Rarity %s) di slot %s"):format(
-                            tostring(m.name), tostring(m.rarity), tostring(hireResult.index)
-                        ), 5)
-                        StopAutoReroll(nil)
-                        break
-                    else
-                        Notify("Crew - Auto Reroll", ("Rarity %s belum sesuai target %d, ulangi..."):format(
-                            tostring(m and m.rarity), TargetRarity
-                        ), 2)
-                        task.wait(0.5)
-                    end
+                if AutoRerollEnabled then
+                    Notify("Crew - Auto Reroll", ("Semua slot dari %d s/d %d sudah selesai direroll dengan target rarity %d!"):format(
+                        REROLL_START_SLOT, totalSlot, TargetRarity
+                    ), 5)
+                    StopAutoReroll(nil)
                 end
             end)
         end,
     })
 
     Tab:CreateButton({
-        Title = "Reroll Sekali (Testing Manual)",
+        Title = "Cek Total Slot Layak Reroll (2 s/d Habis)",
         Callback = function()
-            local dismissResult = DoDismiss(RerollSlotIndex)
-            if dismissResult then
-                print("[Crew][Debug] Manual dismiss: " .. tostring(dismissResult.msg or dismissResult.ok))
-            end
-            task.wait(0.3)
-            local hireResult = DoHire(HireType)
-            if hireResult and hireResult.ok then
-                local m = hireResult.member
-                Notify("Crew - Reroll Manual", ("Hasil: %s (Rarity %s)"):format(
-                    tostring(m and m.name), tostring(m and m.rarity)
-                ), 4)
+            local totalSlot = CountExistingSlots()
+            if totalSlot < REROLL_START_SLOT then
+                Notify("Crew - Info", "Belum ada slot yang layak direroll (total slot: " .. totalSlot .. ")", 3)
             else
-                Notify("Crew - Reroll Manual", (hireResult and hireResult.msg) or "Gagal reroll.", 4)
+                Notify("Crew - Info", ("Slot yang akan direroll: %d s/d %d (total %d slot)"):format(
+                    REROLL_START_SLOT, totalSlot, (totalSlot - REROLL_START_SLOT + 1)
+                ), 4)
             end
         end,
     })
 
     Notify("Crew", "Module Crew berhasil dimuat!", 3)
     print("[Crew][Debug] Inisialisasi Crew System inline selesai.")
-end
-
---======================================================================
--- [[ CREW UPGRADE - INLINE (DEBUG MODE) ]]
--- Tab terpisah khusus buat info jumlah crew & detail tiap member
--- (Slot untuk fitur Auto Upgrade nanti ditambahkan di sini juga)
---======================================================================
-do
-    local Players = game:GetService("Players")
-    local LocalPlayer = Players.LocalPlayer
-
-    print("[CrewUpgrade][Debug] Mulai inisialisasi Crew Upgrade inline...")
-
-    -----------------------------------------------------------------
-    -- Pastikan LunoLibrary:CreateTab tersedia
-    -----------------------------------------------------------------
-    if type(LunoLibrary.CreateTab) ~= "function" then
-        warn("[CrewUpgrade][Debug] LunoLibrary:CreateTab tidak ditemukan!")
-        return
-    end
-
-    local ok_tab, Tab = pcall(function()
-        return LunoLibrary:CreateTab("Crew Upgrade")
-    end)
-
-    if not ok_tab or not Tab then
-        warn("[CrewUpgrade][Debug] Gagal buat Tab 'Crew Upgrade': " .. tostring(Tab))
-        return
-    end
-    print("[CrewUpgrade][Debug] Tab 'Crew Upgrade' berhasil dibuat.")
-
-    local function Notify(title, content, duration)
-        print(("[CrewUpgrade][Notify] %s: %s"):format(title, tostring(content)))
-        local ok = pcall(function()
-            if Context.QueueNotify then
-                Context.QueueNotify({ Title = title, Content = content, Duration = duration or 3 })
-            else
-                LunoLibrary:Notify({ Title = title, Content = content, Duration = duration or 3 })
-            end
-        end)
-        if not ok then
-            pcall(function()
-                LunoLibrary:Notify({ Title = title, Content = content, Duration = duration or 3 })
-            end)
-        end
-    end
-
-    -----------------------------------------------------------------
-    -- Helper: baca panel crew (Member_1..Member_30)
-    -----------------------------------------------------------------
-    local MAX_SLOT_CAP = 30
-
-    local function GetCrewScroller()
-        local ok, scroller = pcall(function()
-            return LocalPlayer.PlayerGui.MafiaWarsUI.Root.Content.CrewPanel.Scroller
-        end)
-        if ok then return scroller end
-        return nil
-    end
-
-    -- Coba baca detail tiap member dari UI (nama & rarity biasanya ada di TextLabel dalam frame Member_X)
-    -- Karena struktur internal frame Member_X belum kamu kasih detail,
-    -- di sini kita scan semua TextLabel di dalamnya sebagai fallback info mentah.
-    local function GetMemberInfo(memberFrame)
-        local info = { raw = {} }
-        for _, child in ipairs(memberFrame:GetDescendants()) do
-            if child:IsA("TextLabel") and child.Text and #child.Text > 0 then
-                table.insert(info.raw, child.Text)
-            end
-        end
-        return info
-    end
-
-    local function ScanAllMembers()
-        local scroller = GetCrewScroller()
-        local members = {}
-
-        if not scroller then
-            return members
-        end
-
-        for i = 1, MAX_SLOT_CAP do
-            local memberFrame = scroller:FindFirstChild("Member_" .. i)
-            if memberFrame then
-                local info = GetMemberInfo(memberFrame)
-                info.index = i
-                table.insert(members, info)
-            else
-                break
-            end
-        end
-
-        return members
-    end
-
-    -----------------------------------------------------------------
-    -- SECTION: INFO CREW (Live Count)
-    -----------------------------------------------------------------
-    Tab:CreateSection("Info Crew Saat Ini")
-
-    -- Pakai Input readonly-style sebagai display (karena library ini gak ada CreateLabel bawaan)
-    Tab:CreateInput({
-        Title = "Jumlah Crew (Live)",
-        Placeholder = "Menghitung...",
-        Callback = function() end, -- readonly, user gak perlu input apa2
-    })
-
-    local LastCrewCount = -1
-
-    local function RefreshCrewInfo(showNotify)
-        local members = ScanAllMembers()
-        local count = #members
-
-        if showNotify or count ~= LastCrewCount then
-            Notify("Crew Info", ("Jumlah Crew: %d / %d slot"):format(count, MAX_SLOT_CAP), 3)
-        end
-
-        LastCrewCount = count
-        return members
-    end
-
-    Tab:CreateButton({
-        Title = "Refresh Info Jumlah Crew",
-        Callback = function()
-            RefreshCrewInfo(true)
-        end,
-    })
-
-    -----------------------------------------------------------------
-    -- SECTION: DETAIL LIST CREW (Pakai ScriptList biar rapi per-card)
-    -----------------------------------------------------------------
-    Tab:CreateSection("Detail Member Crew")
-
-    local CrewListUI = Tab:CreateScriptList()
-
-    local function RefreshCrewList()
-        local members = ScanAllMembers()
-
-        for _, memberInfo in ipairs(members) do
-            local titleText = "Slot " .. memberInfo.index
-            local descText = "-"
-
-            if memberInfo.raw and #memberInfo.raw > 0 then
-                descText = table.concat(memberInfo.raw, " | ")
-            end
-
-            CrewListUI:AddCard({
-                Title = titleText,
-                Description = descText,
-                Icon = "rbxassetid://6031763426",
-                Callback = function()
-                    Notify("Crew Detail", titleText .. " -> " .. descText, 4)
-                end,
-            })
-        end
-
-        print("[CrewUpgrade][Debug] Refresh list crew, total: " .. #members)
-    end
-
-    Tab:CreateButton({
-        Title = "Refresh Detail List Crew",
-        Callback = function()
-            RefreshCrewList()
-        end,
-    })
-
-    -----------------------------------------------------------------
-    -- Auto-refresh info ringan tiap beberapa detik (background thread)
-    -----------------------------------------------------------------
-    task.spawn(function()
-        print("[CrewUpgrade][Debug] Thread auto-refresh info crew dimulai.")
-        while true do
-            RefreshCrewInfo(false)
-            task.wait(5) -- cukup jarang biar gak spam notify & CPU tetap adem
-        end
-    end)
-
-    -----------------------------------------------------------------
-    -- Placeholder Section: AUTO UPGRADE (Menunggu Data Remote)
-    -----------------------------------------------------------------
-    Tab:CreateSection("Auto Upgrade (Segera Hadir)")
-
-    Tab:CreateButton({
-        Title = "Fitur Upgrade Belum Tersedia (Menunggu Data Remote)",
-        Callback = function()
-            Notify("Crew Upgrade", "Fitur ini belum aktif. Kirim format remote CrewAction untuk 'upgrade' agar bisa diimplementasikan.", 4)
-        end,
-    })
-
-    -- Panggil sekali di awal biar langsung ada info pas tab dibuka
-    RefreshCrewInfo(false)
-    RefreshCrewList()
-
-    Notify("Crew Upgrade", "Module Crew Upgrade berhasil dimuat!", 3)
-    print("[CrewUpgrade][Debug] Inisialisasi Crew Upgrade inline selesai.")
 end
