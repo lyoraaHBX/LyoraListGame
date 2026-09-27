@@ -1,5 +1,5 @@
 -- [[ AUTO JOB SCRIPT - LUNO / LYORA X UI ]] --
--- [[ OPTIMIZED FOR CLIENT CPU + UI-BASED OPERATION GUARD ]] --
+-- [[ OPTIMIZED FOR CLIENT CPU + UI-BASED OPERATION GUARD + DEBUG TOOLS ]] --
 
 -- 1. Load Library Lyora X
 local LibraryUrl = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
@@ -427,15 +427,13 @@ end)
 -- =========================================================
 -- AUTO OPERATIONS SYSTEM (TAB TERPISAH: "Operations")
 --
--- === GUARD BARU (ANTI SPAM COLLECT) ===
+-- === GUARD (ANTI SPAM COLLECT) ===
 -- Sebelum invoke Collect, baca LANGSUNG dari UI game:
 --   PlayerGui.MafiaWarsUI.Root.Content.OpsPanel.SlotRow.Slot{N}.Progress.Value
 -- ContentText-nya berisi countdown, contoh: "6:48 left"
 --
 -- Kalau waktu masih tersisa (>0 detik) -> SKIP TOTAL, gak invoke apapun.
 -- Kalau waktu habis / gak kebaca / slot kosong -> baru boleh Collect + Start.
--- Ini jauh lebih akurat dibanding timer lokal karena baca real-time
--- dari state UI yang sebenarnya (anti drift, anti spam invoke).
 -- =========================================================
 local StartOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("StartOperation")
 local CollectOperationRemote = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes"):WaitForChild("CollectOperation")
@@ -458,36 +456,30 @@ local function ParseOperationTimeLeft(rawText)
     if not rawText then return nil end
     local text = tostring(rawText):lower()
 
-    -- Kalau ada keyword yang menandakan siap diklaim
     if string.find(text, "ready") or string.find(text, "collect") or string.find(text, "claim") or string.find(text, "complete") or string.find(text, "done") then
         return 0
     end
 
-    -- Format H:MM:SS (contoh: "15:59:59 left")
     local h, m, s = string.match(text, "(%d+):(%d+):(%d+)")
     if h and m and s then
         return tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(s)
     end
 
-    -- Format M:SS (contoh: "6:48 left")
     local m2, s2 = string.match(text, "(%d+):(%d+)")
     if m2 and s2 then
         return tonumber(m2) * 60 + tonumber(s2)
     end
 
-    -- Format "Xh Ym" (contoh: "3h 20m left")
     local hh, mm = string.match(text, "(%d+)h%s*(%d+)m")
     if hh and mm then
         return tonumber(hh) * 3600 + tonumber(mm) * 60
     end
 
-    -- Format "Xm" saja (contoh: "45m left")
     local mmOnly = string.match(text, "(%d+)m")
     if mmOnly then
         return tonumber(mmOnly) * 60
     end
 
-    -- Gak kebaca formatnya sama sekali
     return nil
 end
 
@@ -500,10 +492,6 @@ local function GetSlotProgressNode(slotIndex)
 end
 
 -- ===== FUNGSI UTAMA GUARD: DAPATKAN SISA WAKTU SLOT =====
--- Return: (seconds, rawText)
---   seconds > 0  -> masih berjalan, JANGAN collect
---   seconds == 0 -> siap diklaim
---   seconds nil  -> gak kebaca / slot kosong -> aman untuk dicoba collect
 local function GetSlotTimeLeft(slotIndex)
     local node = GetSlotProgressNode(slotIndex)
     if not node then
@@ -573,15 +561,12 @@ local function RunOperationSlotLoop(slotIndex)
         local timeLeft, rawInfo = GetSlotTimeLeft(slotIndex)
 
         if timeLeft and timeLeft > 0 then
-            -- ===== GUARD UTAMA =====
             -- Operation masih berjalan (dibaca langsung dari UI game).
             -- JANGAN invoke Collect/Start sama sekali, cuma tunggu.
-            -- Chunk max 10 detik biar tetap responsif kalau di-OFF di tengah.
             local waitChunk = math.min(10, timeLeft)
             task.wait(waitChunk)
         else
             -- timeLeft == 0 (siap collect) ATAU nil (gak kebaca / slot kosong)
-            -- Baru di titik ini boleh coba Collect.
             local collectSuccess, collectResult = TryCollectOperation(slotIndex)
 
             if collectSuccess then
@@ -609,11 +594,8 @@ local function RunOperationSlotLoop(slotIndex)
                     })
 
                     -- Kasih jeda biar UI Progress sempat update ke countdown baru
-                    -- sebelum dicek lagi di iterasi berikutnya (cegah collect prematur)
                     task.wait(3)
                 else
-                    -- Gagal start (requirement kurang / slot server masih dipakai job lain)
-                    -- Guard delay biar gak spam invoke terus-terusan.
                     task.wait(8)
                 end
             end
@@ -625,7 +607,61 @@ end
 
 for slotIndex = 1, 4 do
     OperationsTab:CreateSection("Operation Slot " .. slotIndex)
-    -- =========================================================
+
+    OperationsTab:CreateDropdown({
+        Title = "Select Operation for Slot " .. slotIndex,
+        Options = OperationNamesList,
+        Multi = false,
+        Flag = "SelectedOperationSlot" .. slotIndex,
+        Callback = function(Selected)
+            if OperationMap[Selected] then
+                OperationSlotState[slotIndex].OpId = OperationMap[Selected]
+            end
+        end
+    })
+
+    local toggleRef = OperationsTab:CreateToggle({
+        Title = "Enable Auto Slot " .. slotIndex,
+        Default = false,
+        Flag = "AutoOperationSlot" .. slotIndex .. "Toggle",
+        Callback = function(Value)
+            local slot = OperationSlotState[slotIndex]
+
+            if Value and slotIndex > MaxOperationSlots then
+                QueueNotify({
+                    Title = "Slot " .. slotIndex .. " OFF",
+                    Content = "Slot ini melebihi Max Active Slots (" .. MaxOperationSlots .. "). Naikkan limit dulu di dropdown atas.",
+                    Duration = 4
+                })
+                slot.AutoEnabled = false
+                ForceSetToggleOff(slot.ToggleRef, "AutoOperationSlot" .. slotIndex .. "Toggle")
+                return
+            end
+
+            slot.AutoEnabled = Value
+
+            if Value then
+                local opInfo = OPERATIONS_BY_ID[slot.OpId]
+                QueueNotify({
+                    Title = "Auto Slot " .. slotIndex .. " Started",
+                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih") .. "\nMengecek status via UI dulu...",
+                    Duration = 3
+                })
+
+                if not slot.Running then
+                    slot.Running = true
+                    task.spawn(function()
+                        RunOperationSlotLoop(slotIndex)
+                    end)
+                end
+            end
+        end
+    })
+
+    OperationSlotState[slotIndex].ToggleRef = toggleRef
+end
+
+-- =========================================================
 -- DEBUG TOOLS (BUAT CEK PATH & VALUE MENTAH)
 -- =========================================================
 OperationsTab:CreateSection("Debug Tools")
@@ -643,7 +679,7 @@ OperationsTab:CreateButton({
             local node = GetSlotProgressNode(i)
 
             if not node then
-                local line = "Slot " .. i .. ": ❌ NODE NOT FOUND (path salah/slot gak ada di UI)"
+                local line = "Slot " .. i .. ": NODE NOT FOUND (path salah/slot gak ada di UI)"
                 print("[DEBUG] " .. line)
                 table.insert(summaryLines, line)
             else
@@ -665,7 +701,6 @@ OperationsTab:CreateButton({
                 print("[DEBUG]   -> Node Path: " .. node:GetFullName())
                 print("[DEBUG]   -> Node ClassName: " .. node.ClassName)
 
-                -- Cek juga apakah slot ini AutoEnabled di script
                 local slotState = OperationSlotState[i]
                 print("[DEBUG]   -> AutoEnabled: " .. tostring(slotState.AutoEnabled) .. " | Selected OpId: " .. tostring(slotState.OpId))
 
@@ -682,16 +717,14 @@ OperationsTab:CreateButton({
         print("[DEBUG] Health: " .. tostring(CurrentHealth) .. "/" .. tostring(MaxHealth))
         print("=========================================")
 
-        -- Cek juga apakah root path OpsPanel ketemu atau nggak (buat troubleshoot cepat)
         local opsPanelRoot = SafeFindPath({"PlayerGui", "MafiaWarsUI", "Root", "Content", "OpsPanel"})
         if not opsPanelRoot then
-            print("[DEBUG] ⚠️ WARNING: OpsPanel root TIDAK DITEMUKAN. Kemungkinan UI belum kebuka atau path berubah.")
+            print("[DEBUG] WARNING: OpsPanel root TIDAK DITEMUKAN. Kemungkinan UI belum kebuka atau path berubah.")
             table.insert(summaryLines, "⚠️ OpsPanel root tidak ditemukan!")
         else
-            print("[DEBUG] ✅ OpsPanel root ditemukan: " .. opsPanelRoot:GetFullName())
+            print("[DEBUG] OpsPanel root ditemukan: " .. opsPanelRoot:GetFullName())
         end
 
-        -- Tampilkan ringkasan via Notify
         QueueNotify({
             Title = "Debug Check Selesai",
             Content = table.concat(summaryLines, "\n") .. "\n\nCek Developer Console (F9) untuk detail lengkap.",
@@ -749,59 +782,6 @@ OperationsTab:CreateButton({
         })
     end
 })
-
-    OperationsTab:CreateDropdown({
-        Title = "Select Operation for Slot " .. slotIndex,
-        Options = OperationNamesList,
-        Multi = false,
-        Flag = "SelectedOperationSlot" .. slotIndex,
-        Callback = function(Selected)
-            if OperationMap[Selected] then
-                OperationSlotState[slotIndex].OpId = OperationMap[Selected]
-            end
-        end
-    })
-
-    local toggleRef = OperationsTab:CreateToggle({
-        Title = "Enable Auto Slot " .. slotIndex,
-        Default = false,
-        Flag = "AutoOperationSlot" .. slotIndex .. "Toggle",
-        Callback = function(Value)
-            local slot = OperationSlotState[slotIndex]
-
-            if Value and slotIndex > MaxOperationSlots then
-                QueueNotify({
-                    Title = "Slot " .. slotIndex .. " OFF",
-                    Content = "Slot ini melebihi Max Active Slots (" .. MaxOperationSlots .. "). Naikkan limit dulu di dropdown atas.",
-                    Duration = 4
-                })
-                slot.AutoEnabled = false
-                ForceSetToggleOff(slot.ToggleRef, "AutoOperationSlot" .. slotIndex .. "Toggle")
-                return
-            end
-
-            slot.AutoEnabled = Value
-
-            if Value then
-                local opInfo = OPERATIONS_BY_ID[slot.OpId]
-                QueueNotify({
-                    Title = "Auto Slot " .. slotIndex .. " Started",
-                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih") .. "\nMengecek status via UI dulu...",
-                    Duration = 3
-                })
-
-                if not slot.Running then
-                    slot.Running = true
-                    task.spawn(function()
-                        RunOperationSlotLoop(slotIndex)
-                    end)
-                end
-            end
-        end
-    })
-
-    OperationSlotState[slotIndex].ToggleRef = toggleRef
-end
 
 -- =========================================================
 -- DAILY PLAYTIME REWARD (LADDER CLAIM) SYSTEM
