@@ -68,13 +68,23 @@ end
     CREW UPGRADE (INLINE - TIDAK DIPISAH JADI MODULE)
     Tab sendiri: "Crew Upgrade"
 
-    Logic Reroll:
-    1. MODE RANGE  -> Reroll mulai dari SlotAwal sampai SlotAkhir.
-       Tiap slot akan di-dismiss lalu hire ulang berkali-kali sampai
-       dapet rarity >= target, baru lanjut ke slot berikutnya.
+    UI mengikuti referensi:
+      - Auto Equip Best Crew Gear   (Toggle)
+      - Auto Roll Crew Rarity       (Toggle)
+      - Roll Mode                   (Dropdown)
+      - Hire Tier                   (Dropdown)
+      - Min Rarity                  (Dropdown)
+      - Keep Rarity                 (Dropdown)
 
-    2. MODE SINGLE -> Hanya reroll SATU slot tertentu terus menerus
-       sampai dapet rarity target, lalu berhenti (tidak lanjut slot lain).
+    Rarity Mapping (Urut Rendah -> Tinggi):
+      Common    = 1
+      Uncommon  = 2
+      Rare      = 3
+      Epic      = 4
+      Legendary = 5
+      Mythic    = 6
+      Secret    = 7
+      Forbidden = 8
     ============================================================
 --]]
 
@@ -89,24 +99,53 @@ do
     end)
 
     if okRemote and CrewEvent then
-        ------------------------------------------------------------
-        -- TAB SENDIRI: "Crew Upgrade"
-        ------------------------------------------------------------
         local CrewTab = LunoLibrary:CreateTab("Crew Upgrade")
 
-        local Running = false
-        local StopRequested = false
+        ------------------------------------------------------------
+        -- KONSTANTA & MAPPING RARITY
+        ------------------------------------------------------------
+        -- Sesuaikan range slot ini kalau ternyata jumlah slot crew berbeda.
+        -- Slot 1 diasumsikan tidak bisa di-reroll (default/starter), makanya mulai dari 2.
+        local CREW_SLOTS = {2, 3, 4, 5, 6}
 
-        local Settings = {
-            Mode          = "Range", -- "Range" atau "Single"
-            StartSlot     = 2,
-            EndSlot       = 6,
-            TargetSlot    = 2,       -- dipakai kalau Mode == "Single"
-            TargetRarity  = 6,
-            HireType      = "street",
-            ActionDelay   = 0.3,
-            MaxAttempts   = 200,     -- batas percobaan per slot biar gak infinite loop
+        local RarityNameToValue = {
+            ["Common"]    = 1,
+            ["Uncommon"]  = 2,
+            ["Rare"]      = 3,
+            ["Epic"]      = 4,
+            ["Legendary"] = 5,
+            ["Mythic"]    = 6,
+            ["Secret"]    = 7,
+            ["Forbidden"] = 8,
         }
+
+        local RarityValueToName = {}
+        for name, val in pairs(RarityNameToValue) do
+            RarityValueToName[val] = name
+        end
+
+        -- Dropdown "Min Rarity" & "Keep Rarity" pakai list lengkap & urut dari rendah ke tinggi
+        local RarityOptions = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Secret", "Forbidden"}
+
+        ------------------------------------------------------------
+        -- STATE
+        ------------------------------------------------------------
+        local Settings = {
+            RollMode     = "OneByOne", -- "OneByOne" atau "AllAtOnce"
+            HireTier     = "street",
+            MinRarity    = RarityNameToValue["Common"],    -- 1
+            KeepRarity   = RarityNameToValue["Forbidden"], -- 8 (default = jarang aktif proteksinya)
+            ActionDelay  = 0.3,
+            MaxAttemptsPerSlot = 300,
+        }
+
+        local RollRunning = false
+        local StopRollRequested = false
+
+        local EquipRunning = false
+
+        -- Menyimpan rarity terakhir yang kita ketahui per slot (hasil dari hire kita sendiri)
+        local KnownSlotRarity = {}
 
         ------------------------------------------------------------
         -- HELPER: Safe Invoke
@@ -116,9 +155,7 @@ do
             local ok, result = pcall(function()
                 return table.pack(CrewEvent:InvokeServer(table.unpack(args)))
             end)
-            if ok then
-                return result
-            end
+            if ok then return result end
             return nil
         end
 
@@ -142,211 +179,236 @@ do
         end
 
         ------------------------------------------------------------
-        -- CORE LOGIC: Reroll 1 slot sampai target rarity tercapai
+        -- CEK APAKAH SLOT DIPROTEKSI (KEEP RARITY)
+        -- Catatan: Forbidden = rarity tertinggi (8). Memilih "Forbidden"
+        -- sebagai Keep Rarity membuat proteksi nyaris tidak pernah aktif
+        -- (karena sangat sulit dapat rarity 8), makanya ini jadi default
+        -- seperti di UI referensi.
         ------------------------------------------------------------
-        local function RerollSlotUntilTarget(slot, targetRarity)
-            local attempts = 0
-
-            while not StopRequested and attempts < Settings.MaxAttempts do
-                attempts = attempts + 1
-
-                -- 1. Kosongkan slot (buang member yang ada di situ)
-                DismissSlot(slot)
-                task.wait(Settings.ActionDelay)
-
-                -- 2. Hire baru (otomatis ngisi slot kosong terkecil)
-                local hireResult = HireCrew(Settings.HireType)
-                task.wait(Settings.ActionDelay)
-
-                local ok, rarity, index, member = ExtractResult(hireResult)
-
-                if not ok then
-                    LunoLibrary:Notify({
-                        Title = "Crew Reroll Gagal",
-                        Content = "Invoke gagal di slot " .. tostring(slot) .. ", proses dihentikan.",
-                        Duration = 2.5
-                    })
-                    return false
-                end
-
-                LunoLibrary:Notify({
-                    Title = "Reroll Slot " .. tostring(slot),
-                    Content = string.format("%s | Rarity: %d | Percobaan: %d", tostring(member.name), rarity, attempts),
-                    Duration = 1.2
-                })
-
-                if rarity >= targetRarity then
-                    LunoLibrary:Notify({
-                        Title = "Target Tercapai!",
-                        Content = "Slot " .. tostring(slot) .. " berhasil dapat rarity " .. tostring(rarity),
-                        Duration = 2.5
-                    })
-                    return true
-                end
-
-                if StopRequested then
-                    return false
-                end
+        local function IsSlotProtected(slot)
+            local knownRarity = KnownSlotRarity[slot]
+            if knownRarity and knownRarity >= Settings.KeepRarity then
+                return true
             end
-
-            LunoLibrary:Notify({
-                Title = "Reroll Berhenti",
-                Content = "Slot " .. tostring(slot) .. " mencapai batas maksimal percobaan.",
-                Duration = 2.5
-            })
             return false
         end
 
         ------------------------------------------------------------
-        -- MAIN RUNNER
+        -- REROLL SATU SLOT SEKALI (1 KALI DISMISS + HIRE)
+        -- Return: berhasil?, rarity baru
         ------------------------------------------------------------
-        local function StartCrewReroll()
-            if Running then return end
-            Running = true
-            StopRequested = false
+        local function RerollSlotOnce(slot)
+            DismissSlot(slot)
+            task.wait(Settings.ActionDelay)
 
-            task.spawn(function()
-                if Settings.Mode == "Single" then
-                    RerollSlotUntilTarget(Settings.TargetSlot, Settings.TargetRarity)
+            local hireResult = HireCrew(Settings.HireTier)
+            task.wait(Settings.ActionDelay)
+
+            local ok, rarity, index, member = ExtractResult(hireResult)
+            if ok then
+                KnownSlotRarity[slot] = rarity
+                LunoLibrary:Notify({
+                    Title = "Slot " .. tostring(slot),
+                    Content = string.format("%s | Rarity: %s (%d)", tostring(member.name), RarityValueToName[rarity] or "?", rarity),
+                    Duration = 1.2
+                })
+            end
+            return ok, rarity
+        end
+
+        ------------------------------------------------------------
+        -- MODE: REPLACE ONE BY ONE
+        -- Selesaikan 1 slot sampai capai Min Rarity, baru lanjut slot berikutnya.
+        ------------------------------------------------------------
+        local function RunRollOneByOne()
+            for _, slot in ipairs(CREW_SLOTS) do
+                if StopRollRequested then break end
+                if IsSlotProtected(slot) then
+                    -- lewati slot yang sudah diproteksi Keep Rarity
                 else
-                    for slot = Settings.StartSlot, Settings.EndSlot do
-                        if StopRequested then break end
-                        local success = RerollSlotUntilTarget(slot, Settings.TargetRarity)
-                        if not success then
+                    local attempts = 0
+                    local reached = false
+                    while not StopRollRequested and attempts < Settings.MaxAttemptsPerSlot do
+                        attempts = attempts + 1
+                        local ok, rarity = RerollSlotOnce(slot)
+                        if not ok then
+                            LunoLibrary:Notify({Title = "Error", Content = "Gagal invoke di slot " .. slot, Duration = 2})
                             break
+                        end
+                        if rarity >= Settings.MinRarity then
+                            reached = true
+                            break
+                        end
+                    end
+                    if reached then
+                        LunoLibrary:Notify({Title = "Slot " .. slot .. " Selesai", Content = "Rarity target tercapai!", Duration = 2})
+                    end
+                end
+            end
+        end
+
+        ------------------------------------------------------------
+        -- MODE: REPLACE ALL AT ONCE
+        -- Semua slot direroll bergantian per-putaran sampai semua capai Min Rarity.
+        ------------------------------------------------------------
+        local function RunRollAllAtOnce()
+            local roundLimit = Settings.MaxAttemptsPerSlot
+            local round = 0
+
+            while not StopRollRequested and round < roundLimit do
+                round = round + 1
+                local allDone = true
+
+                for _, slot in ipairs(CREW_SLOTS) do
+                    if StopRollRequested then break end
+
+                    if IsSlotProtected(slot) then
+                        -- skip, dianggap "selesai" karena diproteksi
+                    else
+                        local currentRarity = KnownSlotRarity[slot] or 0
+                        if currentRarity < Settings.MinRarity then
+                            allDone = false
+                            local ok, rarity = RerollSlotOnce(slot)
+                            if not ok then
+                                LunoLibrary:Notify({Title = "Error", Content = "Gagal invoke di slot " .. slot, Duration = 2})
+                            end
                         end
                     end
                 end
 
-                Running = false
-                if LunoLibrary.Elements and LunoLibrary.Elements["CrewAutoRerollToggle"] then
-                    pcall(function() LunoLibrary.Elements["CrewAutoRerollToggle"].Set(false) end)
+                if allDone then break end
+            end
+        end
+
+        ------------------------------------------------------------
+        -- MAIN RUNNER TOGGLE: Auto Roll Crew Rarity
+        ------------------------------------------------------------
+        local function StartAutoRoll()
+            if RollRunning then return end
+            RollRunning = true
+            StopRollRequested = false
+
+            task.spawn(function()
+                if Settings.RollMode == "AllAtOnce" then
+                    RunRollAllAtOnce()
+                else
+                    RunRollOneByOne()
                 end
 
-                LunoLibrary:Notify({
-                    Title = "Crew Reroll",
-                    Content = "Proses selesai / dihentikan.",
-                    Duration = 2
-                })
+                RollRunning = false
+                if LunoLibrary.Elements and LunoLibrary.Elements["CrewAutoRollToggle"] then
+                    pcall(function() LunoLibrary.Elements["CrewAutoRollToggle"].Set(false) end)
+                end
+
+                LunoLibrary:Notify({Title = "Crew Roll", Content = "Proses selesai / dihentikan.", Duration = 2})
             end)
         end
 
-        local function StopCrewReroll()
-            StopRequested = true
+        local function StopAutoRoll()
+            StopRollRequested = true
         end
 
         ------------------------------------------------------------
-        -- UI ELEMENTS
+        -- AUTO EQUIP BEST CREW GEAR
+        -- CATATAN: action remote untuk equip gear belum diketahui pasti.
+        -- Silakan sesuaikan nama action di bawah ("equip_best_gear") begitu
+        -- kamu sudah tahu payload aslinya dari game (contoh: dismiss / hire).
         ------------------------------------------------------------
-        CrewTab:CreateSection("Konfigurasi Reroll Crew")
+        local function TryEquipBestGearOnce()
+            for _, slot in ipairs(CREW_SLOTS) do
+                -- TODO: Ganti "equip_best_gear" dengan action name yang benar,
+                -- dan sesuaikan argumen (slot, gearId, dsb) sesuai remote asli game.
+                SafeInvoke(ACTION_HASH, "equip_best_gear", slot, nil, nil)
+                task.wait(0.2)
+            end
+        end
 
-        CrewTab:CreateDropdown({
-            Title = "Mode Reroll",
-            Options = {"Range (Slot Awal - Akhir)", "Single Slot Saja"},
-            Default = "Range (Slot Awal - Akhir)",
-            Flag = "CrewRerollMode",
-            Callback = function(Value)
-                if Value == "Single Slot Saja" then
-                    Settings.Mode = "Single"
-                else
-                    Settings.Mode = "Range"
+        local function StartAutoEquip()
+            if EquipRunning then return end
+            EquipRunning = true
+
+            task.spawn(function()
+                while EquipRunning do
+                    TryEquipBestGearOnce()
+                    task.wait(5) -- cek ulang tiap 5 detik kalau ada crew baru
                 end
-            end
-        })
+            end)
+        end
 
-        CrewTab:CreateSlider({
-            Title = "Slot Awal / Target Slot (Single)",
-            Min = 1,
-            Max = 10,
-            Default = 2,
-            Suffix = "",
-            Flag = "CrewStartSlot",
-            Callback = function(Value)
-                Settings.StartSlot = Value
-                Settings.TargetSlot = Value
-            end
-        })
+        local function StopAutoEquip()
+            EquipRunning = false
+        end
 
-        CrewTab:CreateSlider({
-            Title = "Slot Akhir (Hanya Mode Range)",
-            Min = 1,
-            Max = 10,
-            Default = 6,
-            Suffix = "",
-            Flag = "CrewEndSlot",
-            Callback = function(Value)
-                Settings.EndSlot = Value
-            end
-        })
-
-        CrewTab:CreateSlider({
-            Title = "Target Rarity",
-            Min = 1,
-            Max = 6,
-            Default = 6,
-            Suffix = " star",
-            Flag = "CrewTargetRarity",
-            Callback = function(Value)
-                Settings.TargetRarity = Value
-            end
-        })
-
-        CrewTab:CreateInput({
-            Title = "Hire Type",
-            Placeholder = "street",
-            Callback = function(Text)
-                if Text and #Text > 0 then
-                    Settings.HireType = Text
-                end
-            end
-        })
-
-        CrewTab:CreateSlider({
-            Title = "Delay Antar Aksi",
-            Min = 1,
-            Max = 20,
-            Default = 3,
-            Suffix = " x0.1s",
-            Flag = "CrewActionDelay",
-            Callback = function(Value)
-                Settings.ActionDelay = Value / 10
-            end
-        })
-
-        CrewTab:CreateSlider({
-            Title = "Max Percobaan / Slot",
-            Min = 10,
-            Max = 500,
-            Default = 200,
-            Suffix = "x",
-            Flag = "CrewMaxAttempts",
-            Callback = function(Value)
-                Settings.MaxAttempts = Value
-            end
-        })
-
-        CrewTab:CreateSection("Kontrol")
-
+        ------------------------------------------------------------
+        -- UI ELEMENTS (URUTAN MENGIKUTI GAMBAR REFERENSI)
+        ------------------------------------------------------------
         CrewTab:CreateToggle({
-            Title = "Mulai Auto Reroll Crew",
+            Title = "Auto Equip Best Crew Gear",
             Default = false,
-            Flag = "CrewAutoRerollToggle",
+            Flag = "CrewAutoEquipGear",
             Callback = function(State)
                 if State then
-                    StartCrewReroll()
+                    StartAutoEquip()
                 else
-                    StopCrewReroll()
+                    StopAutoEquip()
                 end
             end
         })
 
-        CrewTab:CreateButton({
-            Title = "Force Stop",
-            Callback = function()
-                StopCrewReroll()
-                if LunoLibrary.Elements and LunoLibrary.Elements["CrewAutoRerollToggle"] then
-                    pcall(function() LunoLibrary.Elements["CrewAutoRerollToggle"].Set(false) end)
+        CrewTab:CreateToggle({
+            Title = "Auto Roll Crew Rarity",
+            Default = false,
+            Flag = "CrewAutoRollToggle",
+            Callback = function(State)
+                if State then
+                    StartAutoRoll()
+                else
+                    StopAutoRoll()
                 end
+            end
+        })
+
+        CrewTab:CreateDropdown({
+            Title = "Roll Mode",
+            Options = {"Replace One By One", "Replace All At Once"},
+            Default = "Replace One By One",
+            Flag = "CrewRollMode",
+            Callback = function(Value)
+                if Value == "Replace All At Once" then
+                    Settings.RollMode = "AllAtOnce"
+                else
+                    Settings.RollMode = "OneByOne"
+                end
+            end
+        })
+
+        CrewTab:CreateDropdown({
+            Title = "Hire Tier",
+            Options = {"STREET"}, -- tambahin tier lain di sini kalau ada, contoh: "CORPORATE", "ELITE"
+            Default = "STREET",
+            Flag = "CrewHireTier",
+            Callback = function(Value)
+                Settings.HireTier = string.lower(Value)
+            end
+        })
+
+        CrewTab:CreateDropdown({
+            Title = "Min Rarity",
+            Options = RarityOptions,
+            Default = "Common",
+            Flag = "CrewMinRarity",
+            Callback = function(Value)
+                Settings.MinRarity = RarityNameToValue[Value] or 1
+            end
+        })
+
+        CrewTab:CreateDropdown({
+            Title = "Keep Rarity",
+            Options = RarityOptions,
+            Default = "Forbidden",
+            Flag = "CrewKeepRarity",
+            Callback = function(Value)
+                Settings.KeepRarity = RarityNameToValue[Value] or 8
             end
         })
     else
