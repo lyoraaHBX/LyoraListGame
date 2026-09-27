@@ -1,5 +1,5 @@
 -- [[ AUTO JOB SCRIPT - LUNO / LYORA X UI ]] --
--- [[ OPTIMIZED FOR CLIENT CPU + UI-BASED OPERATION GUARD + DEBUG TOOLS ]] --
+-- [[ OPTIMIZED FOR CLIENT CPU + UI-BASED OPERATION GUARD ]] --
 
 -- 1. Load Library Lyora X
 local LibraryUrl = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
@@ -427,14 +427,12 @@ end)
 -- =========================================================
 -- AUTO OPERATIONS SYSTEM (TAB TERPISAH: "Operations")
 --
--- === GUARD (ANTI SPAM COLLECT) ===
 -- Path per slot dibuat DINAMIS 1-4 via "Slot" .. slotIndex:
 --   PlayerGui.MafiaWarsUI.Root.Content.OpsPanel.SlotRow.Slot{N}.Progress.Value
 --
--- === PENTING: HANYA CEK SLOT YANG SEDANG ENABLE ===
+-- HANYA SLOT YANG ENABLE YANG DICEK.
 -- Loop background (RunOperationSlotLoop) HANYA di-spawn untuk slot
--- yang toggle-nya ON. Slot yang OFF sama sekali TIDAK disentuh
--- (tidak baca UI, tidak invoke apapun) -> hemat CPU, gak ngelag.
+-- yang toggle-nya ON. Slot yang OFF sama sekali TIDAK disentuh.
 --
 -- Kalau waktu masih tersisa (>0 detik) -> SKIP TOTAL, gak invoke apapun.
 -- Kalau waktu habis / gak kebaca / slot kosong -> baru boleh Collect + Start.
@@ -650,7 +648,7 @@ for slotIndex = 1, 4 do
                 local opInfo = OPERATIONS_BY_ID[slot.OpId]
                 QueueNotify({
                     Title = "Auto Slot " .. slotIndex .. " Started",
-                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih") .. "\nMengecek status via UI dulu...",
+                    Content = "Operation: " .. (opInfo and opInfo.name or "Belum dipilih"),
                     Duration = 3
                 })
 
@@ -669,135 +667,6 @@ for slotIndex = 1, 4 do
 
     OperationSlotState[slotIndex].ToggleRef = toggleRef
 end
-
--- =========================================================
--- DEBUG TOOLS (BUAT CEK PATH & VALUE MENTAH)
--- HANYA CEK SLOT YANG SEDANG ENABLE (AutoEnabled = true)
--- Slot yang OFF di-skip total, gak dibaca UI-nya sama sekali.
--- =========================================================
-OperationsTab:CreateSection("Debug Tools")
-
-OperationsTab:CreateButton({
-    Title = "🔍 Debug Check Active Operation Slots",
-    Callback = function()
-        print("=========================================")
-        print("[DEBUG] ACTIVE OPERATION SLOTS CHECK")
-        print("[DEBUG] (Hanya slot yang Enable-nya ON)")
-        print("=========================================")
-
-        local summaryLines = {}
-        local activeCount = 0
-
-        for i = 1, 4 do
-            local slotState = OperationSlotState[i]
-
-            if not slotState.AutoEnabled then
-                -- SKIP TOTAL: slot ini OFF, tidak dibaca UI-nya sama sekali
-                local line = "Slot " .. i .. ": OFF (di-skip, tidak dicek)"
-                print("[DEBUG] " .. line)
-                table.insert(summaryLines, line)
-            else
-                activeCount = activeCount + 1
-                local node = GetSlotProgressNode(i)
-
-                if not node then
-                    local line = "Slot " .. i .. " [ENABLED]: NODE NOT FOUND (path salah/UI belum kebuka)"
-                    print("[DEBUG] " .. line)
-                    table.insert(summaryLines, line)
-                else
-                    local rawText = GetRawTextFromNode(node)
-                    local parsedSeconds = ParseOperationTimeLeft(rawText)
-
-                    local statusText
-                    if parsedSeconds == nil then
-                        statusText = "UNKNOWN/EMPTY (aman utk collect)"
-                    elseif parsedSeconds > 0 then
-                        statusText = "RUNNING (" .. parsedSeconds .. "s left)"
-                    else
-                        statusText = "READY TO COLLECT"
-                    end
-
-                    local line = "Slot " .. i .. " [ENABLED]: Raw=\"" .. tostring(rawText) .. "\" | Parsed=" .. tostring(parsedSeconds) .. "s | Status=" .. statusText
-
-                    print("[DEBUG] " .. line)
-                    print("[DEBUG]   -> Node Path: " .. node:GetFullName())
-                    print("[DEBUG]   -> Selected OpId: " .. tostring(slotState.OpId))
-
-                    table.insert(summaryLines, "Slot " .. i .. ": " .. statusText)
-                end
-            end
-        end
-
-        print("=========================================")
-        print("[DEBUG] Total Active Slots Checked: " .. activeCount .. " / 4")
-        print("[DEBUG] LEVEL & BARS STATUS")
-        print("[DEBUG] Level: " .. tostring(CurrentDetectedLevel))
-        print("[DEBUG] Energy: " .. tostring(CurrentEnergy) .. "/" .. tostring(MaxEnergy))
-        print("[DEBUG] Stamina: " .. tostring(CurrentStamina) .. "/" .. tostring(MaxStamina))
-        print("[DEBUG] Health: " .. tostring(CurrentHealth) .. "/" .. tostring(MaxHealth))
-        print("=========================================")
-
-        if activeCount == 0 then
-            table.insert(summaryLines, 1, "⚠️ Tidak ada slot yang Enable. Nyalakan toggle slot dulu.")
-        end
-
-        QueueNotify({
-            Title = "Debug Check Selesai (" .. activeCount .. " Slot Aktif)",
-            Content = table.concat(summaryLines, "\n") .. "\n\nCek Developer Console (F9) untuk detail lengkap.",
-            Duration = 6
-        })
-    end
-})
-
-OperationsTab:CreateButton({
-    Title = "🔍 Debug Dump Full OpsPanel Structure",
-    Callback = function()
-        local opsPanelRoot = SafeFindPath({"PlayerGui", "MafiaWarsUI", "Root", "Content", "OpsPanel"})
-
-        if not opsPanelRoot then
-            print("[DEBUG] OpsPanel root tidak ditemukan, gak bisa dump structure.")
-            QueueNotify({
-                Title = "Debug Dump Gagal",
-                Content = "OpsPanel root tidak ditemukan. Pastikan UI Operations sedang terbuka.",
-                Duration = 4
-            })
-            return
-        end
-
-        print("=========================================")
-        print("[DEBUG] FULL OPSPANEL STRUCTURE DUMP")
-        print("=========================================")
-
-        local function DumpChildren(instance, depth)
-            local prefix = string.rep("  ", depth)
-            for _, child in ipairs(instance:GetChildren()) do
-                local extra = ""
-                local attr = child:GetAttribute("ContentText")
-                if attr ~= nil then
-                    extra = " [ContentText=\"" .. tostring(attr) .. "\"]"
-                elseif child:IsA("TextLabel") or child:IsA("TextButton") then
-                    extra = " [Text=\"" .. child.Text .. "\"]"
-                end
-
-                print(prefix .. "- " .. child.Name .. " (" .. child.ClassName .. ")" .. extra)
-
-                if depth < 5 then
-                    DumpChildren(child, depth + 1)
-                end
-            end
-        end
-
-        DumpChildren(opsPanelRoot, 0)
-
-        print("=========================================")
-
-        QueueNotify({
-            Title = "Debug Dump Selesai",
-            Content = "Struktur lengkap OpsPanel sudah di-print ke Developer Console (F9).",
-            Duration = 4
-        })
-    end
-})
 
 -- =========================================================
 -- DAILY PLAYTIME REWARD (LADDER CLAIM) SYSTEM
