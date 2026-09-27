@@ -36,10 +36,6 @@ local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
 local Context = SharedCore.Init(LunoLibrary)
 
 -- 4. Load & Init tiap fitur sebagai module terpisah
--- URUTAN INI MENENTUKAN URUTAN SECTION DI TAB "Auto Farm":
--- Auto Job -> Auto Property -> Auto Point Allocation -> Daily Reward -> Daily/Weekly Task
--- BankShopModule bikin TAB SENDIRI ("Bank & Shop"), jadi urutannya di sini
--- cuma menentukan kapan tab itu dibuat relatif ke tab lain (bukan section di Auto Farm).
 local FeatureModules = {
     { url = BASE_URL .. "JobModule.lua",         args = { JobsData.JOBS } },
     { url = BASE_URL .. "PropertyModule.lua",    args = { PropertiesData.PROPERTIES } },
@@ -53,7 +49,7 @@ local FeatureModules = {
 for i, feature in ipairs(FeatureModules) do
     local ok, mod = pcall(LoadRemote, feature.url)
     if ok and mod and mod.Init then
-        print("[Loader] Loading order #" .. i .. ": " .. feature.url) -- debug, boleh dihapus nanti
+        print("[Loader] Loading order #" .. i .. ": " .. feature.url)
         local initOk, initErr = pcall(mod.Init, Context, table.unpack(feature.args))
         if not initOk then
             warn("[FeatureInit Error] " .. feature.url .. ": " .. tostring(initErr))
@@ -68,13 +64,16 @@ end
     CREW UPGRADE (INLINE - TIDAK DIPISAH JADI MODULE)
     Tab sendiri: "Crew Upgrade"
 
-    UI mengikuti referensi:
-      - Auto Equip Best Crew Gear   (Toggle)
-      - Auto Roll Crew Rarity       (Toggle)
-      - Roll Mode                   (Dropdown)
-      - Hire Tier                   (Dropdown)
-      - Min Rarity                  (Dropdown)
-      - Keep Rarity                 (Dropdown)
+    FIX PENTING:
+      Sebelumnya, kalau invoke "invalid" (gagal) di tengah proses
+      reroll suatu slot, kode langsung SKIP ke slot berikutnya
+      tanpa retry. Ini bikin kelihatan seperti "berhenti total"
+      padahal sebenarnya slot 3,4,5,6 di-skip diam-diam gara-gara
+      1x gagal invoke doang.
+
+      Sekarang: kalau invoke gagal/invalid, sistem akan RETRY
+      dengan sedikit backoff delay (bukan langsung nyerah pindah
+      slot), sampai batas MaxAttemptsPerSlot tercapai.
 
     Rarity Mapping (Urut Rendah -> Tinggi):
       Common    = 1
@@ -104,8 +103,6 @@ do
         ------------------------------------------------------------
         -- KONSTANTA & MAPPING RARITY
         ------------------------------------------------------------
-        -- Sesuaikan range slot ini kalau ternyata jumlah slot crew berbeda.
-        -- Slot 1 diasumsikan tidak bisa di-reroll (default/starter), makanya mulai dari 2.
         local CREW_SLOTS = {2, 3, 4, 5, 6}
 
         local RarityNameToValue = {
@@ -124,7 +121,6 @@ do
             RarityValueToName[val] = name
         end
 
-        -- Dropdown "Min Rarity" & "Keep Rarity" pakai list lengkap & urut dari rendah ke tinggi
         local RarityOptions = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Secret", "Forbidden"}
 
         ------------------------------------------------------------
@@ -134,9 +130,10 @@ do
             RollMode     = "OneByOne", -- "OneByOne" atau "AllAtOnce"
             HireTier     = "street",
             MinRarity    = RarityNameToValue["Common"],    -- 1
-            KeepRarity   = RarityNameToValue["Forbidden"], -- 8 (default = jarang aktif proteksinya)
-            ActionDelay  = 0.3,
-            MaxAttemptsPerSlot = 300,
+            KeepRarity   = RarityNameToValue["Forbidden"], -- 8
+            ActionDelay  = 0.35,
+            MaxAttemptsPerSlot = 500, -- dinaikin karena sekarang invalid invoke juga makan budget attempt (retry)
+            MaxConsecutiveFailNotify = 10, -- kasih notif tiap 10x gagal beruntun (biar user tau masih jalan, bukan diem)
         }
 
         local RollRunning = false
@@ -180,10 +177,6 @@ do
 
         ------------------------------------------------------------
         -- CEK APAKAH SLOT DIPROTEKSI (KEEP RARITY)
-        -- Catatan: Forbidden = rarity tertinggi (8). Memilih "Forbidden"
-        -- sebagai Keep Rarity membuat proteksi nyaris tidak pernah aktif
-        -- (karena sangat sulit dapat rarity 8), makanya ini jadi default
-        -- seperti di UI referensi.
         ------------------------------------------------------------
         local function IsSlotProtected(slot)
             local knownRarity = KnownSlotRarity[slot]
@@ -217,38 +210,59 @@ do
         end
 
         ------------------------------------------------------------
-        -- MODE: REPLACE ONE BY ONE
+        -- MODE: REPLACE ONE BY ONE  (SUDAH DIPERBAIKI)
         -- Selesaikan 1 slot sampai capai Min Rarity, baru lanjut slot berikutnya.
+        -- Kalau invoke invalid/gagal, JANGAN langsung pindah slot -> RETRY dulu.
         ------------------------------------------------------------
         local function RunRollOneByOne()
             for _, slot in ipairs(CREW_SLOTS) do
                 if StopRollRequested then break end
+
                 if IsSlotProtected(slot) then
                     -- lewati slot yang sudah diproteksi Keep Rarity
                 else
                     local attempts = 0
                     local reached = false
+                    local consecutiveFails = 0
+
                     while not StopRollRequested and attempts < Settings.MaxAttemptsPerSlot do
                         attempts = attempts + 1
                         local ok, rarity = RerollSlotOnce(slot)
+
                         if not ok then
-                            LunoLibrary:Notify({Title = "Error", Content = "Gagal invoke di slot " .. slot, Duration = 2})
-                            break
-                        end
-                        if rarity >= Settings.MinRarity then
-                            reached = true
-                            break
+                            -- FIX: dulu di sini langsung `break` (skip slot).
+                            -- Sekarang: retry dengan backoff delay, TIDAK pindah slot.
+                            consecutiveFails = consecutiveFails + 1
+                            local backoff = math.min(0.5 + (consecutiveFails * 0.25), 3)
+                            task.wait(backoff)
+
+                            if consecutiveFails % Settings.MaxConsecutiveFailNotify == 0 then
+                                LunoLibrary:Notify({
+                                    Title = "Invalid Invoke - Slot " .. slot,
+                                    Content = "Gagal " .. consecutiveFails .. "x beruntun, masih mencoba lagi...",
+                                    Duration = 1.5
+                                })
+                            end
+                        else
+                            consecutiveFails = 0
+                            if rarity >= Settings.MinRarity then
+                                reached = true
+                                break
+                            end
                         end
                     end
+
                     if reached then
                         LunoLibrary:Notify({Title = "Slot " .. slot .. " Selesai", Content = "Rarity target tercapai!", Duration = 2})
+                    elseif not StopRollRequested then
+                        LunoLibrary:Notify({Title = "Slot " .. slot .. " Dilewati", Content = "Batas maksimal percobaan tercapai, lanjut slot berikutnya.", Duration = 2})
                     end
                 end
             end
         end
 
         ------------------------------------------------------------
-        -- MODE: REPLACE ALL AT ONCE
+        -- MODE: REPLACE ALL AT ONCE (backoff juga ditambahkan)
         -- Semua slot direroll bergantian per-putaran sampai semua capai Min Rarity.
         ------------------------------------------------------------
         local function RunRollAllAtOnce()
@@ -270,7 +284,8 @@ do
                             allDone = false
                             local ok, rarity = RerollSlotOnce(slot)
                             if not ok then
-                                LunoLibrary:Notify({Title = "Error", Content = "Gagal invoke di slot " .. slot, Duration = 2})
+                                -- backoff kecil biar gak spam invalid invoke terus-terusan
+                                task.wait(0.6)
                             end
                         end
                     end
@@ -309,10 +324,7 @@ do
         end
 
         ------------------------------------------------------------
-        -- AUTO EQUIP BEST CREW GEAR
-        -- CATATAN: action remote untuk equip gear belum diketahui pasti.
-        -- Silakan sesuaikan nama action di bawah ("equip_best_gear") begitu
-        -- kamu sudah tahu payload aslinya dari game (contoh: dismiss / hire).
+        -- AUTO EQUIP BEST CREW GEAR (placeholder, belum ada contoh remote)
         ------------------------------------------------------------
         local function TryEquipBestGearOnce()
             for _, slot in ipairs(CREW_SLOTS) do
@@ -330,7 +342,7 @@ do
             task.spawn(function()
                 while EquipRunning do
                     TryEquipBestGearOnce()
-                    task.wait(5) -- cek ulang tiap 5 detik kalau ada crew baru
+                    task.wait(5)
                 end
             end)
         end
@@ -384,7 +396,7 @@ do
 
         CrewTab:CreateDropdown({
             Title = "Hire Tier",
-            Options = {"STREET"}, -- tambahin tier lain di sini kalau ada, contoh: "CORPORATE", "ELITE"
+            Options = {"STREET"},
             Default = "STREET",
             Flag = "CrewHireTier",
             Callback = function(Value)
