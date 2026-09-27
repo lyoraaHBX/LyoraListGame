@@ -847,3 +847,198 @@ do
     Notify("Crew", "Module Crew berhasil dimuat!", 3)
     print("[Crew][Debug] Inisialisasi Crew System inline selesai.")
 end
+
+--======================================================================
+-- [[ CREW UPGRADE - INLINE (DEBUG MODE) ]]
+-- Tab terpisah khusus buat info jumlah crew & detail tiap member
+-- (Slot untuk fitur Auto Upgrade nanti ditambahkan di sini juga)
+--======================================================================
+do
+    local Players = game:GetService("Players")
+    local LocalPlayer = Players.LocalPlayer
+
+    print("[CrewUpgrade][Debug] Mulai inisialisasi Crew Upgrade inline...")
+
+    -----------------------------------------------------------------
+    -- Pastikan LunoLibrary:CreateTab tersedia
+    -----------------------------------------------------------------
+    if type(LunoLibrary.CreateTab) ~= "function" then
+        warn("[CrewUpgrade][Debug] LunoLibrary:CreateTab tidak ditemukan!")
+        return
+    end
+
+    local ok_tab, Tab = pcall(function()
+        return LunoLibrary:CreateTab("Crew Upgrade")
+    end)
+
+    if not ok_tab or not Tab then
+        warn("[CrewUpgrade][Debug] Gagal buat Tab 'Crew Upgrade': " .. tostring(Tab))
+        return
+    end
+    print("[CrewUpgrade][Debug] Tab 'Crew Upgrade' berhasil dibuat.")
+
+    local function Notify(title, content, duration)
+        print(("[CrewUpgrade][Notify] %s: %s"):format(title, tostring(content)))
+        local ok = pcall(function()
+            if Context.QueueNotify then
+                Context.QueueNotify({ Title = title, Content = content, Duration = duration or 3 })
+            else
+                LunoLibrary:Notify({ Title = title, Content = content, Duration = duration or 3 })
+            end
+        end)
+        if not ok then
+            pcall(function()
+                LunoLibrary:Notify({ Title = title, Content = content, Duration = duration or 3 })
+            end)
+        end
+    end
+
+    -----------------------------------------------------------------
+    -- Helper: baca panel crew (Member_1..Member_30)
+    -----------------------------------------------------------------
+    local MAX_SLOT_CAP = 30
+
+    local function GetCrewScroller()
+        local ok, scroller = pcall(function()
+            return LocalPlayer.PlayerGui.MafiaWarsUI.Root.Content.CrewPanel.Scroller
+        end)
+        if ok then return scroller end
+        return nil
+    end
+
+    -- Coba baca detail tiap member dari UI (nama & rarity biasanya ada di TextLabel dalam frame Member_X)
+    -- Karena struktur internal frame Member_X belum kamu kasih detail,
+    -- di sini kita scan semua TextLabel di dalamnya sebagai fallback info mentah.
+    local function GetMemberInfo(memberFrame)
+        local info = { raw = {} }
+        for _, child in ipairs(memberFrame:GetDescendants()) do
+            if child:IsA("TextLabel") and child.Text and #child.Text > 0 then
+                table.insert(info.raw, child.Text)
+            end
+        end
+        return info
+    end
+
+    local function ScanAllMembers()
+        local scroller = GetCrewScroller()
+        local members = {}
+
+        if not scroller then
+            return members
+        end
+
+        for i = 1, MAX_SLOT_CAP do
+            local memberFrame = scroller:FindFirstChild("Member_" .. i)
+            if memberFrame then
+                local info = GetMemberInfo(memberFrame)
+                info.index = i
+                table.insert(members, info)
+            else
+                break
+            end
+        end
+
+        return members
+    end
+
+    -----------------------------------------------------------------
+    -- SECTION: INFO CREW (Live Count)
+    -----------------------------------------------------------------
+    Tab:CreateSection("Info Crew Saat Ini")
+
+    -- Pakai Input readonly-style sebagai display (karena library ini gak ada CreateLabel bawaan)
+    Tab:CreateInput({
+        Title = "Jumlah Crew (Live)",
+        Placeholder = "Menghitung...",
+        Callback = function() end, -- readonly, user gak perlu input apa2
+    })
+
+    local LastCrewCount = -1
+
+    local function RefreshCrewInfo(showNotify)
+        local members = ScanAllMembers()
+        local count = #members
+
+        if showNotify or count ~= LastCrewCount then
+            Notify("Crew Info", ("Jumlah Crew: %d / %d slot"):format(count, MAX_SLOT_CAP), 3)
+        end
+
+        LastCrewCount = count
+        return members
+    end
+
+    Tab:CreateButton({
+        Title = "Refresh Info Jumlah Crew",
+        Callback = function()
+            RefreshCrewInfo(true)
+        end,
+    })
+
+    -----------------------------------------------------------------
+    -- SECTION: DETAIL LIST CREW (Pakai ScriptList biar rapi per-card)
+    -----------------------------------------------------------------
+    Tab:CreateSection("Detail Member Crew")
+
+    local CrewListUI = Tab:CreateScriptList()
+
+    local function RefreshCrewList()
+        local members = ScanAllMembers()
+
+        for _, memberInfo in ipairs(members) do
+            local titleText = "Slot " .. memberInfo.index
+            local descText = "-"
+
+            if memberInfo.raw and #memberInfo.raw > 0 then
+                descText = table.concat(memberInfo.raw, " | ")
+            end
+
+            CrewListUI:AddCard({
+                Title = titleText,
+                Description = descText,
+                Icon = "rbxassetid://6031763426",
+                Callback = function()
+                    Notify("Crew Detail", titleText .. " -> " .. descText, 4)
+                end,
+            })
+        end
+
+        print("[CrewUpgrade][Debug] Refresh list crew, total: " .. #members)
+    end
+
+    Tab:CreateButton({
+        Title = "Refresh Detail List Crew",
+        Callback = function()
+            RefreshCrewList()
+        end,
+    })
+
+    -----------------------------------------------------------------
+    -- Auto-refresh info ringan tiap beberapa detik (background thread)
+    -----------------------------------------------------------------
+    task.spawn(function()
+        print("[CrewUpgrade][Debug] Thread auto-refresh info crew dimulai.")
+        while true do
+            RefreshCrewInfo(false)
+            task.wait(5) -- cukup jarang biar gak spam notify & CPU tetap adem
+        end
+    end)
+
+    -----------------------------------------------------------------
+    -- Placeholder Section: AUTO UPGRADE (Menunggu Data Remote)
+    -----------------------------------------------------------------
+    Tab:CreateSection("Auto Upgrade (Segera Hadir)")
+
+    Tab:CreateButton({
+        Title = "Fitur Upgrade Belum Tersedia (Menunggu Data Remote)",
+        Callback = function()
+            Notify("Crew Upgrade", "Fitur ini belum aktif. Kirim format remote CrewAction untuk 'upgrade' agar bisa diimplementasikan.", 4)
+        end,
+    })
+
+    -- Panggil sekali di awal biar langsung ada info pas tab dibuka
+    RefreshCrewInfo(false)
+    RefreshCrewList()
+
+    Notify("Crew Upgrade", "Module Crew Upgrade berhasil dimuat!", 3)
+    print("[CrewUpgrade][Debug] Inisialisasi Crew Upgrade inline selesai.")
+end
