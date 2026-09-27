@@ -709,12 +709,18 @@ for slotIndex = 1, 4 do
 end
 
 -- =========================================================
--- AUTO PROPERTY SYSTEM (TAB TERPISAH: "Property") -- BARU
+-- AUTO PROPERTY SYSTEM (TAB TERPISAH: "Property") -- DIPERBAIKI
 --
--- Mode 1 (Auto Select Best): isi slot kosong dengan properti
--- termahal yang terjangkau & unlock. Kalau slot penuh, cari
--- earner terlemah di antara yang dimiliki, upgrade kalau ada
--- properti lebih untung yang terjangkau.
+-- Mode 1 (Auto Select Best):
+--   - Selama slot masih kosong, sistem akan LOOP beli berkali-kali
+--     dalam 1 cycle, selalu RE-FETCH cash & owned/max tiap iterasi
+--     supaya tidak stale. Kalau cash cuma cukup buat tier di bawah
+--     level saat ini, otomatis turun tier (gap-fill smart).
+--   - Kalau slot sudah penuh, cari earner TERLEMAH yang dimiliki,
+--     bandingkan dengan property terbaik yang affordable sekarang.
+--     Kalau lebih untung -> delete yang lemah, beli yang baru.
+--     Ada fallback rebuy kalau proses upgrade gagal di tengah jalan
+--     supaya slot tidak hilang percuma.
 --
 -- Mode 2 (Manual Select): isi semua slot dengan 1 properti
 -- pilihan user. Kalau ada properti lain nyangkut, ganti satu
@@ -775,6 +781,11 @@ local function GetOwnedPropertiesList()
     return list
 end
 
+-- Cari property termahal yang MASIH TERJANGKAU & UNLOCKED.
+-- Ini otomatis mengimplementasikan "gap-fill smart": kalau cash
+-- gak cukup buat tier tertinggi (misal level 50), maka akan turun
+-- ke tier di bawahnya yang paling dekat & affordable (misal level 45),
+-- dan seterusnya turun terus sampai ketemu yang cash-nya cukup.
 local function GetBestAffordableProperty(cash, level)
     local best = nil
     for _, prop in ipairs(PROPERTIES) do
@@ -857,79 +868,148 @@ PropertyTab:CreateDropdown({
     end
 })
 
-Scheduler:Add("AutoProperty", 2.5, function()
-    if not AutoPropertyEnabled then return end
+-- =========================================================
+-- CORE LOGIC: FILL SLOT KOSONG (GAP-FILL SMART, MULTI-BUY PER CYCLE)
+-- =========================================================
+local function RunAutoFillEmptySlots()
+    local MAX_BUY_PER_CYCLE = 15 -- safety limit biar gak infinite loop / freeze
+
+    for i = 1, MAX_BUY_PER_CYCLE do
+        local curOwned, curMax = GetPropsCapInfo()
+
+        if curMax == 0 or curOwned >= curMax then
+            break
+        end
+
+        local cash = GetCurrentCash()
+        local best = GetBestAffordableProperty(cash, CurrentDetectedLevel)
+
+        if not best then
+            -- Gak ada satupun property yang affordable & unlocked saat ini.
+            break
+        end
+
+        local success = TryBuyProperty(best.id)
+
+        if success then
+            QueueNotify({
+                Title = "Property Bought!",
+                Content = best.name .. " ($" .. FormatMoneyShort(best.baseCost) .. ")",
+                Duration = 2
+            })
+            -- Beri jeda supaya UI (cash & owned count) sempat ter-update
+            -- sebelum iterasi berikutnya membaca ulang data.
+            task.wait(0.7)
+        else
+            -- Gagal beli (mungkin race condition / slot penuh / cash berubah).
+            break
+        end
+    end
+end
+
+-- =========================================================
+-- CORE LOGIC: AUTO UPGRADE (SLOT PENUH, GANTI EARNER TERLEMAH)
+-- =========================================================
+local function RunAutoUpgradeWeakest()
+    local ownedList = GetOwnedPropertiesList()
+    if #ownedList == 0 then return end
+
+    local lowest = nil
+    for _, t in ipairs(ownedList) do
+        if t.earn > 0 then
+            if not lowest or t.earn < lowest.earn then
+                lowest = t
+            end
+        end
+    end
+
+    if not lowest then return end
 
     local cash = GetCurrentCash()
-    local owned, max = GetPropsCapInfo()
+    local best = GetBestAffordableProperty(cash, CurrentDetectedLevel)
 
-    if max == 0 then return end
+    if not best then return end
+    if best.id == lowest.id then return end
+    if GetEffectiveIncome(best) <= lowest.earn then return end
 
-    if AutoHighestPropertyMode then
-        if owned < max then
-            local best = GetBestAffordableProperty(cash, CurrentDetectedLevel)
-            if best then
-                local success = TryBuyProperty(best.id)
-                if success then
+    local delSuccess = TryDeleteProperty(lowest.id)
+
+    if delSuccess then
+        task.wait(0.6)
+
+        -- Re-fetch cash setelah delete, karena delete kadang memberi
+        -- refund sebagian yang mengubah cash user.
+        local postDeleteCash = GetCurrentCash()
+        local reconfirmedBest = GetBestAffordableProperty(postDeleteCash, CurrentDetectedLevel)
+
+        local targetToBuy = reconfirmedBest or best
+
+        local buySuccess = TryBuyProperty(targetToBuy.id)
+
+        if buySuccess then
+            QueueNotify({
+                Title = "Property Upgraded!",
+                Content = "Diganti ke: " .. targetToBuy.name,
+                Duration = 3
+            })
+        else
+            -- FALLBACK: proses upgrade gagal di tengah jalan setelah delete.
+            -- Coba beli balik property lama supaya slot tidak hilang percuma.
+            local oldPropInfo = PROPERTIES_BY_ID[lowest.id]
+            if oldPropInfo then
+                task.wait(0.5)
+                local rebuySuccess = TryBuyProperty(oldPropInfo.id)
+                if rebuySuccess then
                     QueueNotify({
-                        Title = "Property Bought!",
-                        Content = best.name .. " ($" .. FormatMoneyShort(best.baseCost) .. ")",
-                        Duration = 2.5
+                        Title = "Upgrade Gagal - Rollback",
+                        Content = "Gagal beli property baru, berhasil rebuy: " .. oldPropInfo.name,
+                        Duration = 4
+                    })
+                else
+                    QueueNotify({
+                        Title = "Upgrade Gagal!",
+                        Content = "Slot kosong, gagal beli property baru maupun rollback. Cek cash secara manual.",
+                        Duration = 5
                     })
                 end
             end
-        else
-            local ownedList = GetOwnedPropertiesList()
-            if #ownedList == 0 then return end
-
-            local lowest = nil
-            for _, t in ipairs(ownedList) do
-                if t.earn > 0 then
-                    if not lowest or t.earn < lowest.earn then
-                        lowest = t
-                    end
-                end
-            end
-
-            if not lowest then return end
-
-            local best = GetBestAffordableProperty(cash, CurrentDetectedLevel)
-            if best and GetEffectiveIncome(best) > lowest.earn then
-                local delSuccess = TryDeleteProperty(lowest.id)
-                if delSuccess then
-                    task.wait(0.5)
-                    local buySuccess = TryBuyProperty(best.id)
-                    if buySuccess then
-                        QueueNotify({
-                            Title = "Property Upgraded!",
-                            Content = "Diganti ke: " .. best.name,
-                            Duration = 3
-                        })
-                    end
-                end
-            end
         end
-    else
-        local ownedList = GetOwnedPropertiesList()
+    end
+end
 
-        local wrongTile = nil
-        local matchingCount = 0
+-- =========================================================
+-- CORE LOGIC: MANUAL MODE (ISI SEMUA SLOT DENGAN 1 PROPERTI PILIHAN)
+-- =========================================================
+local function RunManualPropertyMode()
+    local owned, max = GetPropsCapInfo()
+    if max == 0 then return end
 
-        for _, t in ipairs(ownedList) do
-            if t.id == SelectedPropertyId then
-                matchingCount = matchingCount + 1
-            elseif not wrongTile then
-                wrongTile = t
-            end
+    local ownedList = GetOwnedPropertiesList()
+
+    local wrongTile = nil
+    local matchingCount = 0
+
+    for _, t in ipairs(ownedList) do
+        if t.id == SelectedPropertyId then
+            matchingCount = matchingCount + 1
+        elseif not wrongTile then
+            wrongTile = t
         end
+    end
 
-        local propInfo = PROPERTIES_BY_ID[SelectedPropertyId]
+    local propInfo = PROPERTIES_BY_ID[SelectedPropertyId]
+    if not propInfo then return end
 
-        if wrongTile then
-            if propInfo and cash >= propInfo.baseCost and CurrentDetectedLevel >= propInfo.level then
-                local delSuccess = TryDeleteProperty(wrongTile.id)
-                if delSuccess then
-                    task.wait(0.5)
+    if wrongTile then
+        local cash = GetCurrentCash()
+        if cash >= propInfo.baseCost and CurrentDetectedLevel >= propInfo.level then
+            local delSuccess = TryDeleteProperty(wrongTile.id)
+            if delSuccess then
+                task.wait(0.6)
+
+                -- Re-fetch cash setelah delete (mungkin ada refund).
+                local postDeleteCash = GetCurrentCash()
+                if postDeleteCash >= propInfo.baseCost then
                     local buySuccess = TryBuyProperty(SelectedPropertyId)
                     if buySuccess then
                         QueueNotify({
@@ -937,30 +1017,66 @@ Scheduler:Add("AutoProperty", 2.5, function()
                             Content = "Diganti ke: " .. propInfo.name,
                             Duration = 3
                         })
+                    else
+                        QueueNotify({
+                            Title = "Replace Gagal!",
+                            Content = "Slot kosong, gagal beli property pilihan. Cek cash.",
+                            Duration = 4
+                        })
                     end
                 end
             end
-        elseif matchingCount < max then
-            if propInfo and cash >= propInfo.baseCost and CurrentDetectedLevel >= propInfo.level then
-                local success = TryBuyProperty(SelectedPropertyId)
-                if success then
-                    QueueNotify({
-                        Title = "Property Bought!",
-                        Content = propInfo.name,
-                        Duration = 2.5
-                    })
-                end
-            end
-        else
-            AutoPropertyEnabled = false
-            ForceSetToggleOff(AutoPropertyToggleRef, "AutoPropertyToggle")
-
-            QueueNotify({
-                Title = "Manual Auto Buy Complete",
-                Content = "Semua slot (" .. max .. ") sudah terisi: " .. (propInfo and propInfo.name or SelectedPropertyId),
-                Duration = 4
-            })
         end
+    elseif matchingCount < max then
+        -- Loop beli beberapa kali dalam 1 cycle biar lebih cepat penuh
+        local MAX_BUY_PER_CYCLE = 15
+        for i = 1, MAX_BUY_PER_CYCLE do
+            local curOwned, curMax = GetPropsCapInfo()
+            if curOwned >= curMax then break end
+
+            local cash = GetCurrentCash()
+            if cash < propInfo.baseCost or CurrentDetectedLevel < propInfo.level then
+                break
+            end
+
+            local success = TryBuyProperty(SelectedPropertyId)
+            if success then
+                QueueNotify({
+                    Title = "Property Bought!",
+                    Content = propInfo.name,
+                    Duration = 2
+                })
+                task.wait(0.7)
+            else
+                break
+            end
+        end
+    else
+        AutoPropertyEnabled = false
+        ForceSetToggleOff(AutoPropertyToggleRef, "AutoPropertyToggle")
+
+        QueueNotify({
+            Title = "Manual Auto Buy Complete",
+            Content = "Semua slot (" .. max .. ") sudah terisi: " .. propInfo.name,
+            Duration = 4
+        })
+    end
+end
+
+Scheduler:Add("AutoProperty", 2.5, function()
+    if not AutoPropertyEnabled then return end
+
+    local owned, max = GetPropsCapInfo()
+    if max == 0 then return end
+
+    if AutoHighestPropertyMode then
+        if owned < max then
+            RunAutoFillEmptySlots()
+        else
+            RunAutoUpgradeWeakest()
+        end
+    else
+        RunManualPropertyMode()
     end
 end)
 
