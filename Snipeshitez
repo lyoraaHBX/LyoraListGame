@@ -1,5 +1,76 @@
+-- [[ MAIN LOADER - CLEAN & OBFUSCATION FRIENDLY ]] --
+
+local BASE_URL = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/"
+local LIB_URL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
+
+-- Cache-buster: paksa GitHub CDN kasih versi terbaru, bukan versi cache lama
+local function NoCacheUrl(url)
+    return url .. "?t=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
+end
+
+local function LoadRemote(url)
+    local ok, src = pcall(game.HttpGet, game, NoCacheUrl(url))
+    if not ok then
+        error("[Loader] Gagal fetch: " .. url .. " | " .. tostring(src))
+    end
+
+    local ok2, mod = pcall(loadstring(src))
+    if not ok2 then
+        error("[Loader] Gagal compile: " .. url .. " | " .. tostring(mod))
+    end
+
+    return mod
+end
+
+-- 1. Load Library UI
+local LunoLibrary = LoadRemote(LIB_URL)
+
+-- 2. Load Data Modules
+local JobsData = LoadRemote(BASE_URL .. "JobsData.lua")
+local OperationsData = LoadRemote(BASE_URL .. "OperationsData.lua")
+local PropertiesData = LoadRemote(BASE_URL .. "PropertiesData.lua")
+local ShopData = LoadRemote(BASE_URL .. "ShopData.lua") -- [NEW] data khusus Shop (modular)
+
+-- 3. Load Shared Core
+local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
+local Context = SharedCore.Init(LunoLibrary)
+
+-- Catatan penting:
+-- Setelah SharedCore.Init() memanggil LunoLibrary:CreateWindow(...),
+-- table "LunoLibrary" di scope ini SUDAH punya method :CreateTab() yang aktif,
+-- karena CreateWindow() mem-patch method baru ke table yang sama (upvalue closure).
+-- Jadi untuk bikin TAB BARU (bukan section di tab yang sudah ada),
+-- kita panggil LunoLibrary:CreateTab(...) langsung.
+
+-- 4. Load & Init tiap fitur sebagai module terpisah
+-- URUTAN INI MENENTUKAN URUTAN SECTION DI TAB "Auto Farm":
+-- Auto Job -> Auto Property -> Auto Point Allocation -> Daily Reward -> Daily/Weekly Task
+local FeatureModules = {
+    { url = BASE_URL .. "JobModule.lua",         args = { JobsData.JOBS } },
+    { url = BASE_URL .. "PropertyModule.lua",    args = { PropertiesData.PROPERTIES } },
+    { url = BASE_URL .. "AllocationModule.lua",  args = {} },
+    { url = BASE_URL .. "DailyRewardModule.lua", args = {} },
+    { url = BASE_URL .. "TaskModule.lua",        args = {} },
+    { url = BASE_URL .. "OperationModule.lua",   args = { OperationsData.OPERATIONS } },
+}
+
+for i, feature in ipairs(FeatureModules) do
+    local ok, mod = pcall(LoadRemote, feature.url)
+    if ok and mod and mod.Init then
+        print("[Loader] Loading order #" .. i .. ": " .. feature.url) -- debug, boleh dihapus nanti
+        local initOk, initErr = pcall(mod.Init, Context, table.unpack(feature.args))
+        if not initOk then
+            warn("[FeatureInit Error] " .. feature.url .. ": " .. tostring(initErr))
+        end
+    else
+        warn("[FeatureLoad Error] " .. feature.url .. ": " .. tostring(mod))
+    end
+end
+
 --======================================================================
 -- [[ BANK & SHOP - INLINE (BELUM DIJADIKAN MODULE, UNTUK DEBUG DULU) ]] --
+-- Auto-detect Character/Profile ID via __namecall hook (sniffing),
+-- TANPA hardcode ID dan TANPA input manual dari user.
 --======================================================================
 do
     local Players = game:GetService("Players")
@@ -12,15 +83,15 @@ do
     print("[BankShop][Debug] Jumlah item SHOP terload: " .. #SHOP)
 
     -----------------------------------------------------------------
-    -- Pastikan LunoLibrary:CreateTab tersedia
+    -- Pastikan LunoLibrary:CreateTab tersedia (artinya CreateWindow sudah dipanggil)
     -----------------------------------------------------------------
     if type(LunoLibrary.CreateTab) ~= "function" then
-        warn("[BankShop][Debug] LunoLibrary:CreateTab tidak ditemukan!")
+        warn("[BankShop][Debug] LunoLibrary:CreateTab tidak ditemukan! Pastikan SharedCore.Init() sudah memanggil LunoLibrary:CreateWindow() sebelum baris ini.")
         return
     end
 
     local ok_tab, Tab = pcall(function()
-        return LunoLibrary:CreateTab("Bank & Shop")
+        return LunoLibrary:CreateTab("Bank & Shop") -- tanpa FixedOrder = otomatis nempel di urutan tab terakhir
     end)
 
     if not ok_tab or not Tab then
@@ -85,8 +156,10 @@ do
                     for _, arg in ipairs(args) do
                         if IsLikelyCharId(arg) then
                             CachedCharId = arg
+                            local remoteName = "Unknown"
+                            pcall(function() remoteName = self.Name end)
                             print(("[BankShop][Hook] Character ID tertangkap dari remote '%s' method '%s': %s"):format(
-                                tostring(self.Name), method, arg
+                                remoteName, method, arg
                             ))
                             break
                         end
@@ -101,7 +174,7 @@ do
         if ok_hook then
             print("[BankShop][Debug] Hook __namecall berhasil dipasang. Menunggu game kirim Character ID...")
         else
-            warn("[BankShop][Debug] Hook __namecall GAGAL dipasang (executor mungkin tidak support hookmetamethod). Fallback ke deteksi manual.")
+            warn("[BankShop][Debug] Hook __namecall GAGAL dipasang (executor mungkin tidak support hookmetamethod/getnamecallmethod). Fallback ke deteksi manual.")
         end
     end
 
@@ -172,12 +245,12 @@ do
         end,
     })
 
-    local DepositDelay = 1.5
+    local DepositDelay = 1.5 -- delay antar deposit (detik), jaga CPU/memory tetap stabil
     Tab:CreateSlider({
         Title = "Delay Antar Deposit",
         Min = 1,
         Max = 50,
-        Default = 15,
+        Default = 15, -- direpresentasikan x10 (15 = 1.5 detik) karena slider library ini integer only
         Suffix = " (x0.1 detik)",
         Flag = "BankDepositDelay",
         Callback = function(val)
@@ -231,6 +304,7 @@ do
             task.spawn(function()
                 while AutoDepositEnabled do
                     local success = DoDeposit()
+                    -- kalau gagal, delay diperpanjang supaya tidak spam invoke sia-sia
                     task.wait(success and DepositDelay or (DepositDelay * 2))
                 end
                 print("[BankShop][Debug] Loop Auto Deposit berhenti.")
@@ -271,7 +345,7 @@ do
         end,
     })
 
-    local BuyDelay = 0.5
+    local BuyDelay = 0.5 -- delay antar percobaan buy per item, cegah spike
     local AutoBuyEnabled = false
 
     local function BuyItem(itemId)
@@ -312,7 +386,7 @@ do
                 if success then
                     Notify("Shop", "Berhasil beli: " .. itemId, 3)
                 end
-                task.wait(BuyDelay)
+                task.wait(BuyDelay) -- delay kecil antar item, tetap ringan di CPU
             end
         end)
     end
@@ -325,7 +399,7 @@ do
             AutoBuyEnabled = value
             if value then
                 Notify("Shop", "Auto Buy aktif, sinkron dengan restock timer...", 3)
-                TryBuySelected()
+                TryBuySelected() -- langsung coba sekali kalau kebetulan diaktifkan saat stock fresh
             else
                 Notify("Shop", "Auto Buy dihentikan", 3)
             end
@@ -340,7 +414,7 @@ do
     })
 
     -----------------------------------------------------------------
-    -- Status Indicator: Character ID Terdeteksi atau Belum
+    -- Status Indicator: Character ID Terdeteksi atau Belum (Debug Tool)
     -----------------------------------------------------------------
     Tab:CreateButton({
         Title = "Cek Status Character ID (Debug)",
@@ -356,6 +430,7 @@ do
 
     -----------------------------------------------------------------
     -- Monitor RestockText -> deteksi refresh stock via ContentText
+    -- Hanya trigger buy PERSIS saat stock baru muncul (bukan spam tiap detik)
     -----------------------------------------------------------------
     local function GetRestockLabel()
         local ok, label = pcall(function()
@@ -366,6 +441,7 @@ do
     end
 
     local function ParseRemainingSeconds(text)
+        -- format contoh: "NEW STOCK IN 4:59"
         local m, s = text:match("(%d+):(%d+)")
         if m and s then
             return tonumber(m) * 60 + tonumber(s)
@@ -373,6 +449,7 @@ do
         return nil
     end
 
+    -- 1 thread ringan, cek tiap 1 detik saja (bukan busy loop) supaya CPU tetap adem
     task.spawn(function()
         local lastRemaining = nil
         print("[BankShop][Debug] Thread monitor RestockText dimulai.")
@@ -384,6 +461,8 @@ do
                 if ok and text then
                     local remaining = ParseRemainingSeconds(text)
                     if remaining then
+                        -- Deteksi restock: waktu tiba2 melompat naik jauh dari sebelumnya
+                        -- (misal dari 0:02 -> 4:59), artinya cycle baru dimulai
                         if lastRemaining and remaining > lastRemaining + 60 then
                             print("[BankShop][Debug] Restock terdeteksi! lastRemaining=" .. tostring(lastRemaining) .. " -> remaining=" .. tostring(remaining))
                             if AutoBuyEnabled then
