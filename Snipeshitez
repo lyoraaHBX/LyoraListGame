@@ -3,7 +3,6 @@
 local BASE_URL = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/"
 local LIB_URL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
 
--- Cache-buster: paksa GitHub CDN kasih versi terbaru, bukan versi cache lama
 local function NoCacheUrl(url)
     return url .. "?t=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
 end
@@ -64,43 +63,31 @@ end
     CREW UPGRADE (INLINE - TIDAK DIPISAH JADI MODULE)
     Tab sendiri: "Crew Upgrade"
 
-    LOGIC BARU:
-      1. Jumlah slot crew dibaca DINAMIS dari:
-         PlayerGui.MafiaWarsUI.Root.Content.CrewPanel.SummaryRow.BadgeMembers
-         Format text: "16 OF 16 HENCHMEN" -> ambil angka kedua (max = 16)
-         Slot yang bisa direroll = 2 sampai max (slot 1 dikecualikan).
-         Contoh: 16 OF 16 HENCHMEN -> slot 2..16 (15 slot)
-                 17 OF 17 HENCHMEN -> slot 2..17 (16 slot)
+    LOGIC "SELESAI" UNTUK SATU SLOT (2 KONDISI, mana saja duluan):
+      1. EXACT MATCH  -> rarity yang didapat PERSIS SAMA dengan
+                          Target Rarity yang dipilih user.
+      2. KEEP RARITY  -> rarity yang didapat SUDAH >= Keep Rarity
+                          (safety net). Ini dianggap "hoki" / terlalu
+                          bagus untuk dilepas, jadi otomatis di-STOP
+                          & disimpan walau bukan target yang diminta.
 
-      2. Kalau jumlah HENCHMEN NAMBAH di tengah proses roll
-         (misal dari 16 jadi 17), sistem otomatis mendeteksi
-         slot baru dan ikut memprosesnya, TANPA perlu restart toggle.
+      Contoh: Target = Uncommon(2), Keep Rarity = Forbidden(8)
+        - Dapet Rare(3)      -> BELUM selesai (reroll terus)
+        - Dapet Uncommon(2)  -> SELESAI (exact match target)
+        - Dapet Forbidden(8) -> SELESAI (kena Keep Rarity, di-keep)
 
-      3. Mode "Replace One By One":
-         - Fokus 1 slot dulu (mulai dari slot terkecil, misal slot 2)
-         - Reroll terus sampai capai target rarity (Min Rarity)
-         - Baru pindah ke slot berikutnya
-         - Kalau ada slot baru muncul (HENCHMEN nambah), otomatis
-           ditambahkan ke antrian setelah slot yang sedang berjalan.
-
-      4. Mode "Replace All At Once":
-         - Semua slot direroll bergantian per-putaran (round-robin)
-         - Slot yang sudah capai target -> STOP, tidak direroll lagi
-         - Slot lain lanjut sampai semua slot habis/capai target
-         - Slot baru (HENCHMEN nambah) otomatis ikut diproses.
+    SLOT DINAMIS:
+      Jumlah slot dibaca dari:
+      PlayerGui.MafiaWarsUI.Root.Content.CrewPanel.SummaryRow.BadgeMembers
+      Format: "16 OF 16 HENCHMEN" -> slot 2..16
+      Kalau HENCHMEN nambah di tengah proses, slot baru otomatis
+      ikut diproses tanpa perlu restart toggle.
 
     Rarity Mapping (Urut Rendah -> Tinggi):
-      Common    = 1
-      Uncommon  = 2
-      Rare      = 3
-      Epic      = 4
-      Legendary = 5
-      Mythic    = 6
-      Secret    = 7
-      Forbidden = 8
+      Common=1, Uncommon=2, Rare=3, Epic=4,
+      Legendary=5, Mythic=6, Secret=7, Forbidden=8
 
-    Hire Tier:
-      street, professional, elite
+    Hire Tier: street, professional, elite
     ============================================================
 --]]
 
@@ -122,7 +109,6 @@ do
         ------------------------------------------------------------
         -- KONSTANTA & MAPPING RARITY
         ------------------------------------------------------------
-        -- Fallback kalau UI HENCHMEN gagal terbaca (misal belum ke-load).
         local CREW_SLOTS_FALLBACK = {2, 3, 4, 5, 6}
 
         local RarityNameToValue = {
@@ -149,26 +135,23 @@ do
         local Settings = {
             RollMode     = "OneByOne", -- "OneByOne" atau "AllAtOnce"
             HireTier     = "street",
-            MinRarity    = RarityNameToValue["Common"],    -- 1
-            KeepRarity   = RarityNameToValue["Forbidden"], -- 8
+            MinRarity    = RarityNameToValue["Common"],    -- Target Rarity (exact match)
+            KeepRarity   = RarityNameToValue["Forbidden"], -- Safety net (>= ini = auto keep)
             ActionDelay  = 0.35,
             MaxAttemptsPerSlot = 500,
             MaxConsecutiveFailNotify = 10,
-            RecheckIdleDelay = 2, -- delay sebelum cek ulang apakah HENCHMEN nambah
+            RecheckIdleDelay = 2,
         }
 
         local RollRunning = false
         local StopRollRequested = false
-
         local EquipRunning = false
 
-        -- Menyimpan rarity terakhir yang kita ketahui per slot (hasil dari hire kita sendiri)
+        -- Menyimpan rarity terakhir yang kita ketahui per slot
         local KnownSlotRarity = {}
 
         ------------------------------------------------------------
         -- BACA JUMLAH HENCHMEN DARI UI GAME
-        -- Path: PlayerGui.MafiaWarsUI.Root.Content.CrewPanel.SummaryRow.BadgeMembers
-        -- Format text: "16 OF 16 HENCHMEN" -> ambil angka setelah "OF"
         ------------------------------------------------------------
         local function GetCurrentHenchmenMax()
             local ok, result = pcall(function()
@@ -195,12 +178,10 @@ do
 
                 local textSource = nil
 
-                -- Kemungkinan 1: BadgeMembers sendiri adalah TextLabel/TextButton
                 if badgeMembers:IsA("TextLabel") or badgeMembers:IsA("TextButton") then
                     textSource = badgeMembers.Text
                 end
 
-                -- Kemungkinan 2: ada child bernama "ContentText"
                 if not textSource then
                     local contentText = badgeMembers:FindFirstChild("ContentText")
                     if contentText and (contentText:IsA("TextLabel") or contentText:IsA("TextButton")) then
@@ -208,7 +189,6 @@ do
                     end
                 end
 
-                -- Kemungkinan 3 (fallback): cari descendant TextLabel/TextButton manapun
                 if not textSource then
                     for _, desc in ipairs(badgeMembers:GetDescendants()) do
                         if desc:IsA("TextLabel") or desc:IsA("TextButton") then
@@ -222,7 +202,6 @@ do
 
                 if not textSource then return nil end
 
-                -- Format: "16 OF 16 HENCHMEN" -> ambil angka kedua (max)
                 local maxNum = textSource:match("OF%s+(%d+)")
                 if maxNum then
                     return tonumber(maxNum)
@@ -282,7 +261,8 @@ do
         end
 
         ------------------------------------------------------------
-        -- CEK APAKAH SLOT DIPROTEKSI (KEEP RARITY)
+        -- CEK APAKAH SLOT SUDAH DIPROTEKSI (dari rarity yang sudah diketahui)
+        -- Dipakai untuk skip slot yang sudah "kept" di awal pemrosesan.
         ------------------------------------------------------------
         local function IsSlotProtected(slot)
             local knownRarity = KnownSlotRarity[slot]
@@ -290,6 +270,19 @@ do
                 return true
             end
             return false
+        end
+
+        ------------------------------------------------------------
+        -- CEK APAKAH RARITY TERTENTU SUDAH "SELESAI" (target/keep)
+        -- Return: isDone (bool), reason ("target" / "kept" / nil)
+        ------------------------------------------------------------
+        local function CheckIsDone(rarity)
+            if rarity == Settings.MinRarity then
+                return true, "target"
+            elseif rarity >= Settings.KeepRarity then
+                return true, "kept"
+            end
+            return false, nil
         end
 
         ------------------------------------------------------------
@@ -315,8 +308,8 @@ do
         end
 
         ------------------------------------------------------------
-        -- REROLL 1 SLOT SAMPAI TARGET (dipakai mode OneByOne)
-        -- Return: reached (bool)
+        -- REROLL 1 SLOT SAMPAI SELESAI (EXACT MATCH ATAU KEEP RARITY)
+        -- Return: reached (bool), reason ("target"/"kept"/"maxattempts")
         ------------------------------------------------------------
         local function RerollSlotUntilTarget(slot)
             local attempts = 0
@@ -340,13 +333,15 @@ do
                     end
                 else
                     consecutiveFails = 0
-                    if rarity >= Settings.MinRarity then
-                        return true
+
+                    local isDone, reason = CheckIsDone(rarity)
+                    if isDone then
+                        return true, reason
                     end
                 end
             end
 
-            return false
+            return false, "maxattempts"
         end
 
         ------------------------------------------------------------
@@ -357,22 +352,24 @@ do
 
             while not StopRollRequested do
                 local slots = GetCrewSlots()
-                local didWork = false
 
                 for _, slot in ipairs(slots) do
                     if StopRollRequested then break end
 
                     if not processedSlots[slot] then
-                        didWork = true
-
                         if IsSlotProtected(slot) then
                             processedSlots[slot] = true
+                            LunoLibrary:Notify({Title = "Slot " .. slot .. " Dilewati", Content = "Sudah memenuhi Keep Rarity sebelumnya.", Duration = 1.5})
                         else
-                            local reached = RerollSlotUntilTarget(slot)
+                            local reached, reason = RerollSlotUntilTarget(slot)
                             processedSlots[slot] = true
 
                             if reached then
-                                LunoLibrary:Notify({Title = "Slot " .. slot .. " Selesai", Content = "Rarity target tercapai!", Duration = 2})
+                                if reason == "kept" then
+                                    LunoLibrary:Notify({Title = "Slot " .. slot .. " Selesai (Kept)", Content = "Rarity >= Keep Rarity tercapai, dipertahankan!", Duration = 2})
+                                else
+                                    LunoLibrary:Notify({Title = "Slot " .. slot .. " Selesai", Content = "Target Rarity tercapai persis!", Duration = 2})
+                                end
                             elseif not StopRollRequested then
                                 LunoLibrary:Notify({Title = "Slot " .. slot .. " Dilewati", Content = "Batas maksimal percobaan tercapai.", Duration = 2})
                             end
@@ -382,7 +379,6 @@ do
 
                 if StopRollRequested then break end
 
-                -- Cek apakah semua slot yang diketahui sudah diproses
                 local allProcessed = true
                 for _, slot in ipairs(slots) do
                     if not processedSlots[slot] then
@@ -392,15 +388,11 @@ do
                 end
 
                 if allProcessed then
-                    -- Tunggu sebentar, cek apakah HENCHMEN nambah (slot baru muncul)
                     task.wait(Settings.RecheckIdleDelay)
                     local newSlots = GetCrewSlots()
-
                     if #newSlots <= #slots then
-                        -- Tidak ada slot baru -> selesai total
                         break
                     end
-                    -- Kalau ada slot baru, loop akan lanjut memprosesnya di iterasi berikutnya
                 end
             end
         end
@@ -421,28 +413,36 @@ do
                     if StopRollRequested then break end
 
                     if not doneSlots[slot] then
-                        if IsSlotProtected(slot) then
-                            doneSlots[slot] = true
-                        else
-                            local currentRarity = KnownSlotRarity[slot] or 0
-                            if currentRarity >= Settings.MinRarity then
+                        local currentRarity = KnownSlotRarity[slot]
+
+                        if currentRarity then
+                            local isDone = CheckIsDone(currentRarity)
+                            if isDone then
                                 doneSlots[slot] = true
-                            else
-                                allDone = false
-                                local ok, rarity = RerollSlotOnce(slot)
-                                if ok and rarity >= Settings.MinRarity then
+                            end
+                        end
+
+                        if not doneSlots[slot] then
+                            allDone = false
+                            local ok, rarity = RerollSlotOnce(slot)
+                            if ok then
+                                local isDone, reason = CheckIsDone(rarity)
+                                if isDone then
                                     doneSlots[slot] = true
-                                    LunoLibrary:Notify({Title = "Slot " .. slot .. " Stop", Content = "Target tercapai, tidak direroll lagi.", Duration = 1.5})
-                                elseif not ok then
-                                    task.wait(0.6)
+                                    if reason == "kept" then
+                                        LunoLibrary:Notify({Title = "Slot " .. slot .. " Stop (Kept)", Content = "Rarity >= Keep Rarity, dipertahankan!", Duration = 1.5})
+                                    else
+                                        LunoLibrary:Notify({Title = "Slot " .. slot .. " Stop", Content = "Target Rarity tercapai persis!", Duration = 1.5})
+                                    end
                                 end
+                            else
+                                task.wait(0.6)
                             end
                         end
                     end
                 end
 
                 if allDone then
-                    -- Tunggu sebentar, cek apakah HENCHMEN nambah
                     task.wait(Settings.RecheckIdleDelay)
                     local newSlots = GetCrewSlots()
                     if #newSlots <= #slots then
@@ -510,7 +510,7 @@ do
         end
 
         ------------------------------------------------------------
-        -- UI ELEMENTS (URUTAN MENGIKUTI GAMBAR REFERENSI)
+        -- UI ELEMENTS
         ------------------------------------------------------------
         CrewTab:CreateToggle({
             Title = "Auto Equip Best Crew Gear",
@@ -563,7 +563,7 @@ do
         })
 
         CrewTab:CreateDropdown({
-            Title = "Min Rarity",
+            Title = "Target Rarity",
             Options = RarityOptions,
             Default = "Common",
             Flag = "CrewMinRarity",
