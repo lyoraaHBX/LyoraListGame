@@ -70,6 +70,8 @@ do
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local LocalPlayer       = Players.LocalPlayer
 
+    local JOB_HASH = "ca01587a32b24eb1a0527e8e595e8483"
+
     local FightTab = LunoLibrary:CreateTab("Fight & Bosses")
 
     -- Cache remotes (pcall biar ga hard error kalau path beda)
@@ -79,17 +81,6 @@ do
         GetHitListEvent = MWRemotes:WaitForChild("GetHitList")
         AttackEvent     = MWRemotes:WaitForChild("Attack")
     end)
-
-    -- Generate random session id (32 hex char) untuk GetHitList
-    local function GenerateSessionId()
-        local chars = "0123456789abcdef"
-        local id = {}
-        for i = 1, 32 do
-            local idx = math.random(1, #chars)
-            id[i] = chars:sub(idx, idx)
-        end
-        return table.concat(id)
-    end
 
     -- Safe index chain (tidak error kalau salah satu step nil)
     local function SafeIndex(root, ...)
@@ -261,12 +252,11 @@ do
         return nil
     end
 
-    -- Ambil hit list dari server (session id random, sudah terverifikasi bekerja)
+    -- Ambil hit list dari server (pakai JOB_HASH sebagai session id)
     local function GetHitList(forceRefresh)
         if not GetHitListEvent then return {} end
-        local sessionId = GenerateSessionId()
         local ok, result = pcall(function()
-            return table.pack(GetHitListEvent:InvokeServer(sessionId, forceRefresh or false))
+            return table.pack(GetHitListEvent:InvokeServer(JOB_HASH, forceRefresh or false))
         end)
         if ok and result[1] and result[1].ok and result[1].list then
             return result[1].list
@@ -274,12 +264,12 @@ do
         return {}
     end
 
-    -- Serang target - session id DIKOSONGKAN sesuai instruksi
+    -- Serang target (pakai JOB_HASH sebagai session id)
     -- Return: success (boolean), battleResult (table berisi won, dmgDealt, xpEstimate, dll)
     local function AttackPlayer(targetUserId)
         if not AttackEvent then return false, nil end
         local ok, result = pcall(function()
-            return table.pack(AttackEvent:InvokeServer("", targetUserId))
+            return table.pack(AttackEvent:InvokeServer(JOB_HASH, targetUserId))
         end)
         if ok and result[1] then
             return true, result[1]
