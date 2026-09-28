@@ -35,6 +35,10 @@ local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
 local Context = SharedCore.Init(LunoLibrary)
 
 -- 4. Load & Init tiap fitur sebagai module terpisah
+-- URUTAN INI MENENTUKAN URUTAN SECTION DI TAB "Auto Farm":
+-- Auto Job -> Auto Property -> Auto Point Allocation -> Daily Reward -> Daily/Weekly Task
+-- BankShopModule & CrewModule bikin TAB SENDIRI, jadi urutannya di sini
+-- cuma menentukan kapan tab itu dibuat relatif ke tab lain (bukan section di Auto Farm).
 local FeatureModules = {
     { url = BASE_URL .. "JobModule.lua",         args = { JobsData.JOBS } },
     { url = BASE_URL .. "PropertyModule.lua",    args = { PropertiesData.PROPERTIES } },
@@ -76,7 +80,7 @@ do
         AttackEvent     = MWRemotes:WaitForChild("Attack")
     end)
 
-    -- Generate random session id (32 hex char) tiap request
+    -- Generate random session id (32 hex char) untuk GetHitList
     local function GenerateSessionId()
         local chars = "0123456789abcdef"
         local id = {}
@@ -87,41 +91,177 @@ do
         return table.concat(id)
     end
 
-    -- Cari TextLabel/TextBox/TextButton bernama "ContentText" secara recursive
-    local function FindContentText(inst)
-        if not inst then return nil end
-        for _, child in ipairs(inst:GetChildren()) do
-            if child.Name == "ContentText" and (child:IsA("TextLabel") or child:IsA("TextBox") or child:IsA("TextButton")) then
+    -- Safe index chain (tidak error kalau salah satu step nil)
+    local function SafeIndex(root, ...)
+        local current = root
+        for _, name in ipairs({...}) do
+            if not current then return nil end
+            local ok, nextInst = pcall(function() return current:FindFirstChild(name) end)
+            if not ok or not nextInst then return nil end
+            current = nextInst
+        end
+        return current
+    end
+
+    -- Cari descendant berdasarkan nama (fallback kalau path exact gagal)
+    local function FindDescendantByName(root, name)
+        if not root then return nil end
+        local ok, descendants = pcall(function() return root:GetDescendants() end)
+        if not ok then return nil end
+        for _, child in ipairs(descendants) do
+            if child.Name == name then
                 return child
             end
-            local found = FindContentText(child)
-            if found then return found end
         end
         return nil
     end
 
-    -- Ambil level player dari UI
-    local function GetMyLevel()
-        local ok, result = pcall(function()
-            local playerGui   = LocalPlayer:WaitForChild("PlayerGui")
-            local mafiaUI     = playerGui:WaitForChild("MafiaWarsUI", 5)
-            local levelBadge  = mafiaUI.Root.TopBar.AvatarCard.AvatarCluster.AvatarFrame.LevelBadge
+    -- Deep dump semua descendant untuk cari struktur asli LevelBadge
+    local function DeepDumpLevelBadge()
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not playerGui then
+            print("[LUNO DUMP] PlayerGui NOT FOUND")
+            return
+        end
 
-            local contentText = FindContentText(levelBadge)
-            if contentText then
-                return tonumber(contentText.Text)
-            end
+        local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
+        if not mafiaUI then
+            print("[LUNO DUMP] MafiaWarsUI NOT FOUND")
+            return
+        end
 
-            if levelBadge:IsA("TextLabel") then
-                return tonumber(levelBadge.Text)
+        local levelBadge = SafeIndex(mafiaUI, "Root", "TopBar", "AvatarCard", "AvatarCluster", "AvatarFrame", "LevelBadge")
+        if not levelBadge then
+            print("[LUNO DUMP] LevelBadge NOT FOUND via exact path, trying fallback search...")
+            levelBadge = FindDescendantByName(mafiaUI, "LevelBadge")
+            if not levelBadge then
+                print("[LUNO DUMP] LevelBadge NOT FOUND anywhere in MafiaWarsUI!")
+                return
             end
+        end
+
+        print("========== DEEP DUMP LEVELBADGE ==========")
+        print("LevelBadge Full Path: " .. levelBadge:GetFullName())
+        print("LevelBadge ClassName: " .. levelBadge.ClassName)
+
+        local okText, textVal = pcall(function() return levelBadge.Text end)
+        if okText then
+            print("LevelBadge.Text: '" .. tostring(textVal) .. "'")
+        else
+            print("LevelBadge has no .Text property")
+        end
+
+        print("--- Direct Children of LevelBadge ---")
+        local directChildren = levelBadge:GetChildren()
+        if #directChildren == 0 then
+            print("  (NO DIRECT CHILDREN)")
+        end
+        for _, child in ipairs(directChildren) do
+            local childText = ""
+            local ok, txt = pcall(function() return child.Text end)
+            if ok then childText = " | Text: '" .. tostring(txt) .. "'" end
+            print("  Name: " .. child.Name .. " | Class: " .. child.ClassName .. childText)
+        end
+
+        print("--- ALL Descendants of LevelBadge (recursive) ---")
+        local allDescendants = levelBadge:GetDescendants()
+        if #allDescendants == 0 then
+            print("  (NO DESCENDANTS AT ALL)")
+        end
+        for _, desc in ipairs(allDescendants) do
+            local descText = ""
+            local ok, txt = pcall(function() return desc.Text end)
+            if ok then descText = " | Text: '" .. tostring(txt) .. "'" end
+            print("  Name: " .. desc.Name .. " | Class: " .. desc.ClassName .. descText)
+        end
+
+        print("--- Siblings of LevelBadge (children of AvatarFrame) ---")
+        local avatarFrame = levelBadge.Parent
+        if avatarFrame then
+            for _, sib in ipairs(avatarFrame:GetChildren()) do
+                local sibText = ""
+                local ok, txt = pcall(function() return sib.Text end)
+                if ok then sibText = " | Text: '" .. tostring(txt) .. "'" end
+                print("  Name: " .. sib.Name .. " | Class: " .. sib.ClassName .. sibText)
+            end
+        end
+
+        print("===========================================")
+    end
+
+    -- Ambil level player dari UI dengan multi-fallback + debug log
+    local function GetMyLevel(debugMode)
+        local debugLog = {}
+
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not playerGui then
+            table.insert(debugLog, "PlayerGui: NOT FOUND")
+            if debugMode then return nil, debugLog end
             return nil
-        end)
-        if ok then return result end
+        end
+        table.insert(debugLog, "PlayerGui: OK")
+
+        local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
+        if not mafiaUI then
+            table.insert(debugLog, "MafiaWarsUI: NOT FOUND")
+            if debugMode then return nil, debugLog end
+            return nil
+        end
+        table.insert(debugLog, "MafiaWarsUI: OK")
+
+        local levelBadge = SafeIndex(mafiaUI, "Root", "TopBar", "AvatarCard", "AvatarCluster", "AvatarFrame", "LevelBadge")
+
+        if levelBadge then
+            table.insert(debugLog, "LevelBadge (exact path): OK")
+        else
+            table.insert(debugLog, "LevelBadge (exact path): FAILED, trying fallback search...")
+            levelBadge = FindDescendantByName(mafiaUI, "LevelBadge")
+            if levelBadge then
+                table.insert(debugLog, "LevelBadge (fallback search): OK")
+            else
+                table.insert(debugLog, "LevelBadge (fallback search): NOT FOUND")
+                if debugMode then return nil, debugLog end
+                return nil
+            end
+        end
+
+        local allDescendants = levelBadge:GetDescendants()
+        local candidateNumbers = {}
+
+        local okSelf, selfText = pcall(function() return levelBadge.Text end)
+        if okSelf and selfText then
+            local num = tostring(selfText):match("^%s*(%d+)%s*$")
+            if num then table.insert(candidateNumbers, {name = "LevelBadge itself", text = selfText, num = tonumber(num)}) end
+        end
+
+        for _, desc in ipairs(allDescendants) do
+            local ok, txt = pcall(function() return desc.Text end)
+            if ok and txt then
+                local num = tostring(txt):match("^%s*(%d+)%s*$")
+                if num then
+                    table.insert(candidateNumbers, {name = desc.Name, text = txt, num = tonumber(num)})
+                end
+            end
+        end
+
+        table.insert(debugLog, "Total pure-number candidates found: " .. #candidateNumbers)
+        for _, cand in ipairs(candidateNumbers) do
+            table.insert(debugLog, "  Candidate -> Name: " .. cand.name .. " | Text: '" .. tostring(cand.text) .. "' | Num: " .. cand.num)
+        end
+
+        if #candidateNumbers > 0 then
+            local chosen = candidateNumbers[1]
+            table.insert(debugLog, "Chosen Level: " .. chosen.num .. " (from " .. chosen.name .. ")")
+            if debugMode then return chosen.num, debugLog end
+            return chosen.num
+        end
+
+        table.insert(debugLog, "No pure-number text found in LevelBadge or its descendants!")
+        if debugMode then return nil, debugLog end
         return nil
     end
 
-    -- Ambil hit list dari server
+    -- Ambil hit list dari server (session id random, sudah terverifikasi bekerja)
     local function GetHitList(forceRefresh)
         if not GetHitListEvent then return {} end
         local sessionId = GenerateSessionId()
@@ -134,45 +274,86 @@ do
         return {}
     end
 
-    -- Serang target
+    -- Serang target - session id DIKOSONGKAN sesuai instruksi
+    -- Return: success (boolean), battleResult (table berisi won, dmgDealt, xpEstimate, dll)
     local function AttackPlayer(targetUserId)
-        if not AttackEvent then return false end
-        local sessionId = GenerateSessionId()
-        local ok = pcall(function()
-            AttackEvent:InvokeServer(sessionId, targetUserId)
+        if not AttackEvent then return false, nil end
+        local ok, result = pcall(function()
+            return table.pack(AttackEvent:InvokeServer("", targetUserId))
         end)
-        return ok
+        if ok and result[1] then
+            return true, result[1]
+        end
+        return false, nil
     end
 
-    -- Cari target valid: level lebih rendah, tidak shielded, stamina > 0
-    -- Ambil yang levelnya paling mendekati (tertinggi di bawah level kita) biar respect maksimal
-    local function FindValidTarget(list, myLevel)
+    -- Cari target valid berdasarkan aturan level:
+    -- 1. Kalau target level <= level kita -> SELALU VALID, tanpa batas gap
+    -- 2. Kalau target level > level kita -> VALID hanya jika selisihnya kecil (maxGapAbove)
+    -- Prioritas: ambil target dengan level TERTINGGI yang masih valid (maksimalkan respect/reward)
+    local function FindValidTarget(list, myLevel, maxGapAbove)
+        maxGapAbove = maxGapAbove or 2
         local bestTarget = nil
+
         for _, target in ipairs(list) do
-            if target.level and target.level < myLevel then
-                if not target.shielded then
-                    if not target.stamina or target.stamina > 0 then
-                        if not bestTarget or target.level > bestTarget.level then
-                            bestTarget = target
+            if target.level then
+                local levelDiff = target.level - myLevel
+                local isValidLevel = false
+
+                if levelDiff <= 0 then
+                    -- Level target sama atau lebih rendah -> selalu valid, no gap limit
+                    isValidLevel = true
+                elseif levelDiff > 0 and levelDiff <= maxGapAbove then
+                    -- Level target sedikit lebih tinggi -> masih valid selama dalam batas gap
+                    isValidLevel = true
+                end
+
+                if isValidLevel then
+                    if not target.shielded then
+                        if not target.stamina or target.stamina > 0 then
+                            if not bestTarget or target.level > bestTarget.level then
+                                bestTarget = target
+                            end
                         end
                     end
                 end
             end
         end
+
         return bestTarget
+    end
+
+    -- Format hasil battle report jadi string yang enak dibaca
+    local function FormatBattleReport(battleResult)
+        if not battleResult then return "Tidak ada data hasil pertarungan." end
+
+        local status = battleResult.won and "MENANG" or "KALAH"
+        local lines = {
+            status .. " vs " .. tostring(battleResult.targetName) .. " (Lv." .. tostring(battleResult.targetLevel) .. ")",
+            "DMG Dealt: " .. tostring(battleResult.dmgDealt) .. " | DMG Taken: " .. tostring(battleResult.dmgTaken),
+            "XP: " .. tostring(battleResult.xp or battleResult.xpEstimate),
+            "Respect Estimate: " .. tostring(battleResult.respectEstimate),
+            "Cash Estimate: " .. tostring(battleResult.cashEstimate),
+            "Stamina Cost: " .. tostring(battleResult.staminaCost),
+        }
+        if battleResult.knockout then
+            table.insert(lines, "KNOCKOUT!")
+        end
+        return table.concat(lines, "\n")
     end
 
     local AutoAttackEnabled = false
     local AttackDelay = 3
+    local MaxLevelGapAbove = 2
 
     local function AutoAttackLoop()
         while AutoAttackEnabled do
-            local myLevel = GetMyLevel()
+            local myLevel = GetMyLevel(false)
 
             if not myLevel then
                 LunoLibrary:Notify({
                     Title = "Fight & Bosses",
-                    Content = "Level tidak ditemukan, mencoba lagi...",
+                    Content = "Level tidak ditemukan, retry... (cek tombol Debug Level)",
                     Duration = 2
                 })
                 task.wait(AttackDelay)
@@ -180,22 +361,23 @@ do
             end
 
             local list = GetHitList(false)
-            local target = FindValidTarget(list, myLevel)
+            local target = FindValidTarget(list, myLevel, MaxLevelGapAbove)
 
             -- Kalau ga ketemu target valid, langsung force refresh
             if not target then
                 list = GetHitList(true)
-                target = FindValidTarget(list, myLevel)
+                target = FindValidTarget(list, myLevel, MaxLevelGapAbove)
             end
 
             if target then
-                local success = AttackPlayer(target.userId)
-                if success then
+                local success, battleResult = AttackPlayer(target.userId)
+                if success and battleResult then
                     LunoLibrary:Notify({
                         Title = "Auto Attack",
-                        Content = "Menyerang " .. tostring(target.name) .. " (Lv." .. tostring(target.level) .. ")",
-                        Duration = 2
+                        Content = FormatBattleReport(battleResult),
+                        Duration = 4
                     })
+                    print("[AUTO ATTACK] " .. FormatBattleReport(battleResult):gsub("\n", " | "))
                 else
                     LunoLibrary:Notify({
                         Title = "Auto Attack",
@@ -206,7 +388,7 @@ do
             else
                 LunoLibrary:Notify({
                     Title = "Auto Attack",
-                    Content = "Tidak ada target level rendah, menunggu...",
+                    Content = "Tidak ada target valid, menunggu...",
                     Duration = 2
                 })
             end
@@ -218,7 +400,7 @@ do
     FightTab:CreateSection("Auto Attack")
 
     FightTab:CreateToggle({
-        Title = "Auto Attack (Target Level Lebih Rendah)",
+        Title = "Auto Attack (Smart Level Targeting)",
         Default = false,
         Flag = "AutoAttackLowerLevel",
         Callback = function(State)
@@ -241,16 +423,125 @@ do
         end
     })
 
-    FightTab:CreateSection("Info")
+    FightTab:CreateSlider({
+        Title = "Max Level Gap Above (Kalau Musuh Lebih Tinggi)",
+        Min = 0,
+        Max = 5,
+        Default = 2,
+        Suffix = " lvl",
+        Flag = "MaxLevelGapAbove",
+        Callback = function(Value)
+            MaxLevelGapAbove = Value
+        end
+    })
+
+    FightTab:CreateButton({
+        Title = "Test Attack (Manual Trigger Sekali Jalan)",
+        Callback = function()
+            local myLevel = GetMyLevel(false)
+            if not myLevel then
+                LunoLibrary:Notify({
+                    Title = "Test Attack",
+                    Content = "Gagal! Level kamu tidak terdeteksi.",
+                    Duration = 3
+                })
+                return
+            end
+
+            LunoLibrary:Notify({
+                Title = "Test Attack",
+                Content = "Level kamu: " .. tostring(myLevel) .. " | Mengambil hit list...",
+                Duration = 2
+            })
+
+            local list = GetHitList(false)
+            local target = FindValidTarget(list, myLevel, MaxLevelGapAbove)
+
+            if not target then
+                LunoLibrary:Notify({
+                    Title = "Test Attack",
+                    Content = "Tidak ada target valid, mencoba force refresh...",
+                    Duration = 2
+                })
+                list = GetHitList(true)
+                target = FindValidTarget(list, myLevel, MaxLevelGapAbove)
+            end
+
+            if not target then
+                LunoLibrary:Notify({
+                    Title = "Test Attack",
+                    Content = "Tetap tidak ada target valid setelah refresh!",
+                    Duration = 3
+                })
+                print("[TEST ATTACK] Tidak ada target. Total list: " .. #list)
+                for _, t in ipairs(list) do
+                    print("  -> " .. tostring(t.name) .. " | Lv." .. tostring(t.level) .. " | Shielded: " .. tostring(t.shielded) .. " | Stamina: " .. tostring(t.stamina))
+                end
+                return
+            end
+
+            print("[TEST ATTACK] Target ditemukan: " .. target.name .. " (Lv." .. target.level .. ", userId: " .. target.userId .. ")")
+
+            local success, battleResult = AttackPlayer(target.userId)
+
+            if success and battleResult then
+                LunoLibrary:Notify({
+                    Title = "Test Attack Result",
+                    Content = FormatBattleReport(battleResult),
+                    Duration = 5
+                })
+                print("========== TEST ATTACK RESULT ==========")
+                print(FormatBattleReport(battleResult))
+                print("=========================================")
+            else
+                LunoLibrary:Notify({
+                    Title = "Test Attack Result",
+                    Content = "GAGAL menyerang " .. target.name .. " (Invoke error atau server menolak)",
+                    Duration = 4
+                })
+            end
+        end
+    })
+
+    FightTab:CreateSection("Info & Debug")
 
     FightTab:CreateButton({
         Title = "Cek Level Saya Sekarang",
         Callback = function()
-            local lvl = GetMyLevel()
+            local lvl = GetMyLevel(false)
             LunoLibrary:Notify({
                 Title = "Level Info",
                 Content = lvl and ("Level kamu saat ini: " .. tostring(lvl)) or "Level tidak ditemukan!",
                 Duration = 3
+            })
+        end
+    })
+
+    FightTab:CreateButton({
+        Title = "Debug Level Detection (Cek Console)",
+        Callback = function()
+            local lvl, log = GetMyLevel(true)
+            print("========== LUNO LEVEL DEBUG ==========")
+            for _, line in ipairs(log) do
+                print(line)
+            end
+            print("=======================================")
+            LunoLibrary:Notify({
+                Title = "Debug Selesai",
+                Content = lvl and ("Level: " .. tostring(lvl) .. " | Cek F9 Console untuk detail") or "Gagal! Cek F9 Console untuk detail",
+                Duration = 4
+            })
+        end
+    })
+
+    FightTab:CreateButton({
+        Title = "Deep Dump LevelBadge Structure (Cek Console)",
+        Callback = function()
+            DeepDumpLevelBadge()
+            LunoLibrary:Notify({
+                Title = "Deep Dump",
+                Content = "Cek F9 Console untuk struktur lengkap LevelBadge!",
+                Duration = 4
             })
         end
     })
