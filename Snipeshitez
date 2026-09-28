@@ -77,11 +77,42 @@ do
     local MAX_LEVEL_GAP_ABOVE = 1
     local MAX_WIN_STREAK = 5
     local MIN_HEALTH_TO_RESUME = 30
+    local LEVEL_CHECK_INTERVAL = 5 -- detik, biar ga CPU spike saat nunggu level up
 
-    -- List boss yang bisa diserang otomatis (tambahkan sendiri disini)
+    -- List boss modular: HANYA id + level (data lain tidak perlu untuk logic auto attack)
     local BOSS_LIST = {
-        "boss_rizzo",
-        "boss_marchese",
+        { id = "boss_rizzo",      level = 7   },
+        { id = "boss_marchese",   level = 14  },
+        { id = "boss_carmine",    level = 20  },
+        { id = "boss_moretti",    level = 26  },
+        { id = "boss_vargas",     level = 32  },
+        { id = "boss_mendes",     level = 38  },
+        { id = "boss_hector",     level = 44  },
+        { id = "boss_delgado",    level = 50  },
+        { id = "boss_sokolov",    level = 56  },
+        { id = "boss_volkova",    level = 62  },
+        { id = "boss_maksim",     level = 68  },
+        { id = "boss_kovac",      level = 74  },
+        { id = "boss_chen",       level = 80  },
+        { id = "boss_zhao",       level = 86  },
+        { id = "boss_jin",        level = 92  },
+        { id = "boss_shan",       level = 98  },
+        { id = "boss_blackwood",  level = 104 },
+        { id = "boss_vane",       level = 110 },
+        { id = "boss_cassius",    level = 116 },
+        { id = "boss_chancellor", level = 122 },
+        { id = "boss_margrave",   level = 128 },
+        { id = "boss_brenner",    level = 134 },
+        { id = "boss_aurmont",    level = 140 },
+        { id = "boss_veil",       level = 146 },
+        { id = "boss_grigio",     level = 152 },
+        { id = "boss_corvo",      level = 158 },
+        { id = "boss_marcanto",   level = 164 },
+        { id = "boss_vespera",    level = 170 },
+        { id = "boss_varrick",    level = 176 },
+        { id = "boss_maren",      level = 182 },
+        { id = "boss_quen",       level = 188 },
+        { id = "boss_caradine",   level = 194 },
     }
 
     local FightTab = LunoLibrary:CreateTab("Fight & Bosses")
@@ -250,7 +281,6 @@ do
     end
 
     -- Serang target player (pakai JOB_HASH sebagai session id)
-    -- Return: invokeSuccess (boolean), battleResult (table lengkap termasuk ok, won, msg, dll)
     local function AttackPlayer(targetUserId)
         if not AttackEvent then return false, nil end
         local ok, result = pcall(function()
@@ -263,7 +293,6 @@ do
     end
 
     -- Serang boss (pakai JOB_HASH sebagai session id)
-    -- Return: invokeSuccess (boolean), bossResult (table berisi ok, msg, dll)
     local function AttackBoss(bossId)
         if not BossActionEvent then return false, nil end
         local ok, result = pcall(function()
@@ -275,7 +304,7 @@ do
         return false, nil
     end
 
-    -- Cek apakah battleResult/bossResult menunjukkan status hospitalized
+    -- Cek apakah result menunjukkan status hospitalized
     local function IsHospitalized(result)
         if not result then return false end
         if result.ok == false and result.msg then
@@ -299,9 +328,20 @@ do
         return false
     end
 
-    -- Cari target valid berdasarkan aturan level:
-    -- 1. Kalau target level <= level kita -> SELALU VALID, tanpa batas gap
-    -- 2. Kalau target level > level kita -> VALID hanya jika selisih <= MAX_LEVEL_GAP_ABOVE (fix = 1)
+    -- Cek apakah result menunjukkan requirement level ("Requires level 14.")
+    -- Return: isRequireLevel (boolean), requiredLevel (number atau nil)
+    local function GetRequiredLevel(result)
+        if not result then return false, nil end
+        if result.ok == false and result.msg then
+            local reqLevel = tostring(result.msg):match("[Rr]equires%s+[Ll]evel%s+(%d+)")
+            if reqLevel then
+                return true, tonumber(reqLevel)
+            end
+        end
+        return false, nil
+    end
+
+    -- Cari target valid berdasarkan aturan level
     local function FindValidTarget(list, myLevel)
         local bestTarget = nil
 
@@ -518,6 +558,7 @@ do
     ----------------------------------------------------------------
     local AutoBossEnabled = false
     local WasWaitingForBossHealth = false
+    local WasWaitingForBossLevel = false
 
     local function AutoBossLoop()
         local bossIndex = 1
@@ -533,9 +574,37 @@ do
                 break
             end
 
-            local currentBoss = BOSS_LIST[bossIndex]
+            local currentBossData = BOSS_LIST[bossIndex]
+            local currentBoss = currentBossData.id
 
-            -- Cek health dulu
+            -- OPTIMASI: pre-check level dari data lokal SEBELUM invoke server
+            -- Kalau level kita masih kurang dari boss.level di data lokal,
+            -- skip invoke server dulu (hemat request), tapi tetap re-check
+            -- pakai interval biar ga busy-loop nge-spam GetMyLevel tiap frame.
+            local myLevel = GetMyLevel()
+            if myLevel and currentBossData.level and myLevel < currentBossData.level then
+                if not WasWaitingForBossLevel then
+                    LunoLibrary:Notify({
+                        Title = "Auto Boss",
+                        Content = currentBoss .. " requires level " .. currentBossData.level .. ". Level kamu: " .. myLevel .. ". Menunggu...",
+                        Duration = 3
+                    })
+                    WasWaitingForBossLevel = true
+                end
+                task.wait(LEVEL_CHECK_INTERVAL) -- delay panjang, hemat CPU/memory, ga ngeframe
+                continue
+            else
+                if WasWaitingForBossLevel then
+                    LunoLibrary:Notify({
+                        Title = "Auto Boss",
+                        Content = "Level sudah cukup untuk " .. currentBoss .. "! Melanjutkan serangan.",
+                        Duration = 2
+                    })
+                    WasWaitingForBossLevel = false
+                end
+            end
+
+            -- Cek health
             local myHealth = GetMyHealth(false)
             if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
                 if not WasWaitingForBossHealth then
@@ -562,13 +631,26 @@ do
             local invokeSuccess, bossResult = AttackBoss(currentBoss)
 
             if invokeSuccess and bossResult then
-                if IsHospitalized(bossResult) then
+                local isRequireLevel, requiredLevel = GetRequiredLevel(bossResult)
+
+                if isRequireLevel then
+                    -- Server juga konfirmasi requirement level (fallback kalau data lokal beda/kurang akurat)
+                    if not WasWaitingForBossLevel then
+                        LunoLibrary:Notify({
+                            Title = "Auto Boss",
+                            Content = currentBoss .. " requires level " .. tostring(requiredLevel) .. " (dari server). Menunggu level naik...",
+                            Duration = 3
+                        })
+                        WasWaitingForBossLevel = true
+                    end
+                    task.wait(LEVEL_CHECK_INTERVAL)
+                    continue
+                elseif IsHospitalized(bossResult) then
                     LunoLibrary:Notify({
                         Title = "Auto Boss",
                         Content = "Kamu dihospitalisasi saat lawan " .. currentBoss .. "! " .. tostring(bossResult.msg),
                         Duration = 3
                     })
-                    -- tetap di boss yang sama, tunggu health pulih di iterasi berikutnya
                 elseif IsBossRecovering(bossResult) then
                     LunoLibrary:Notify({
                         Title = "Auto Boss",
@@ -606,6 +688,7 @@ do
         end
 
         WasWaitingForBossHealth = false
+        WasWaitingForBossLevel = false
     end
 
     ----------------------------------------------------------------
@@ -784,6 +867,12 @@ do
                 for key, val in pairs(bossResult) do
                     print("  " .. tostring(key) .. ": " .. tostring(val))
                 end
+
+                local isRequireLevel, requiredLevel = GetRequiredLevel(bossResult)
+                if isRequireLevel then
+                    print("  [DETECTED] Requires Level: " .. tostring(requiredLevel))
+                end
+
                 LunoLibrary:Notify({
                     Title = "Debug Boss Attack",
                     Content = FormatBossReport("boss_marchese", bossResult),
