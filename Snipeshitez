@@ -35,10 +35,6 @@ local SharedCore = LoadRemote(BASE_URL .. "SharedCore.lua")
 local Context = SharedCore.Init(LunoLibrary)
 
 -- 4. Load & Init tiap fitur sebagai module terpisah
--- URUTAN INI MENENTUKAN URUTAN SECTION DI TAB "Auto Farm":
--- Auto Job -> Auto Property -> Auto Point Allocation -> Daily Reward -> Daily/Weekly Task
--- BankShopModule & CrewModule bikin TAB SENDIRI, jadi urutannya di sini
--- cuma menentukan kapan tab itu dibuat relatif ke tab lain (bukan section di Auto Farm).
 local FeatureModules = {
     { url = BASE_URL .. "JobModule.lua",         args = { JobsData.JOBS } },
     { url = BASE_URL .. "PropertyModule.lua",    args = { PropertiesData.PROPERTIES } },
@@ -60,4 +56,215 @@ for i, feature in ipairs(FeatureModules) do
     else
         warn("[FeatureLoad Error] " .. feature.url .. ": " .. tostring(mod))
     end
+end
+
+----------------------------------------------------------------
+-- [[ FIGHT & BOSSES TAB - AUTO ATTACK SYSTEM ]]
+----------------------------------------------------------------
+do
+    local Players           = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local LocalPlayer       = Players.LocalPlayer
+
+    local FightTab = LunoLibrary:CreateTab("Fight & Bosses")
+
+    -- Cache remotes (pcall biar ga hard error kalau path beda)
+    local MWRemotes, GetHitListEvent, AttackEvent
+    pcall(function()
+        MWRemotes       = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes")
+        GetHitListEvent = MWRemotes:WaitForChild("GetHitList")
+        AttackEvent     = MWRemotes:WaitForChild("Attack")
+    end)
+
+    -- Generate random session id (32 hex char) tiap request
+    local function GenerateSessionId()
+        local chars = "0123456789abcdef"
+        local id = {}
+        for i = 1, 32 do
+            local idx = math.random(1, #chars)
+            id[i] = chars:sub(idx, idx)
+        end
+        return table.concat(id)
+    end
+
+    -- Cari TextLabel/TextBox/TextButton bernama "ContentText" secara recursive
+    local function FindContentText(inst)
+        if not inst then return nil end
+        for _, child in ipairs(inst:GetChildren()) do
+            if child.Name == "ContentText" and (child:IsA("TextLabel") or child:IsA("TextBox") or child:IsA("TextButton")) then
+                return child
+            end
+            local found = FindContentText(child)
+            if found then return found end
+        end
+        return nil
+    end
+
+    -- Ambil level player dari UI
+    local function GetMyLevel()
+        local ok, result = pcall(function()
+            local playerGui   = LocalPlayer:WaitForChild("PlayerGui")
+            local mafiaUI     = playerGui:WaitForChild("MafiaWarsUI", 5)
+            local levelBadge  = mafiaUI.Root.TopBar.AvatarCard.AvatarCluster.AvatarFrame.LevelBadge
+
+            local contentText = FindContentText(levelBadge)
+            if contentText then
+                return tonumber(contentText.Text)
+            end
+
+            if levelBadge:IsA("TextLabel") then
+                return tonumber(levelBadge.Text)
+            end
+            return nil
+        end)
+        if ok then return result end
+        return nil
+    end
+
+    -- Ambil hit list dari server
+    local function GetHitList(forceRefresh)
+        if not GetHitListEvent then return {} end
+        local sessionId = GenerateSessionId()
+        local ok, result = pcall(function()
+            return table.pack(GetHitListEvent:InvokeServer(sessionId, forceRefresh or false))
+        end)
+        if ok and result[1] and result[1].ok and result[1].list then
+            return result[1].list
+        end
+        return {}
+    end
+
+    -- Serang target
+    local function AttackPlayer(targetUserId)
+        if not AttackEvent then return false end
+        local sessionId = GenerateSessionId()
+        local ok = pcall(function()
+            AttackEvent:InvokeServer(sessionId, targetUserId)
+        end)
+        return ok
+    end
+
+    -- Cari target valid: level lebih rendah, tidak shielded, stamina > 0
+    -- Ambil yang levelnya paling mendekati (tertinggi di bawah level kita) biar respect maksimal
+    local function FindValidTarget(list, myLevel)
+        local bestTarget = nil
+        for _, target in ipairs(list) do
+            if target.level and target.level < myLevel then
+                if not target.shielded then
+                    if not target.stamina or target.stamina > 0 then
+                        if not bestTarget or target.level > bestTarget.level then
+                            bestTarget = target
+                        end
+                    end
+                end
+            end
+        end
+        return bestTarget
+    end
+
+    local AutoAttackEnabled = false
+    local AttackDelay = 3
+
+    local function AutoAttackLoop()
+        while AutoAttackEnabled do
+            local myLevel = GetMyLevel()
+
+            if not myLevel then
+                LunoLibrary:Notify({
+                    Title = "Fight & Bosses",
+                    Content = "Level tidak ditemukan, mencoba lagi...",
+                    Duration = 2
+                })
+                task.wait(AttackDelay)
+                continue
+            end
+
+            local list = GetHitList(false)
+            local target = FindValidTarget(list, myLevel)
+
+            -- Kalau ga ketemu target valid, langsung force refresh
+            if not target then
+                list = GetHitList(true)
+                target = FindValidTarget(list, myLevel)
+            end
+
+            if target then
+                local success = AttackPlayer(target.userId)
+                if success then
+                    LunoLibrary:Notify({
+                        Title = "Auto Attack",
+                        Content = "Menyerang " .. tostring(target.name) .. " (Lv." .. tostring(target.level) .. ")",
+                        Duration = 2
+                    })
+                else
+                    LunoLibrary:Notify({
+                        Title = "Auto Attack",
+                        Content = "Gagal menyerang " .. tostring(target.name),
+                        Duration = 2
+                    })
+                end
+            else
+                LunoLibrary:Notify({
+                    Title = "Auto Attack",
+                    Content = "Tidak ada target level rendah, menunggu...",
+                    Duration = 2
+                })
+            end
+
+            task.wait(AttackDelay)
+        end
+    end
+
+    FightTab:CreateSection("Auto Attack")
+
+    FightTab:CreateToggle({
+        Title = "Auto Attack (Target Level Lebih Rendah)",
+        Default = false,
+        Flag = "AutoAttackLowerLevel",
+        Callback = function(State)
+            AutoAttackEnabled = State
+            if State then
+                task.spawn(AutoAttackLoop)
+            end
+        end
+    })
+
+    FightTab:CreateSlider({
+        Title = "Attack Delay",
+        Min = 1,
+        Max = 15,
+        Default = 3,
+        Suffix = "s",
+        Flag = "AttackDelayValue",
+        Callback = function(Value)
+            AttackDelay = Value
+        end
+    })
+
+    FightTab:CreateSection("Info")
+
+    FightTab:CreateButton({
+        Title = "Cek Level Saya Sekarang",
+        Callback = function()
+            local lvl = GetMyLevel()
+            LunoLibrary:Notify({
+                Title = "Level Info",
+                Content = lvl and ("Level kamu saat ini: " .. tostring(lvl)) or "Level tidak ditemukan!",
+                Duration = 3
+            })
+        end
+    })
+
+    FightTab:CreateSection("Bosses")
+
+    FightTab:CreateButton({
+        Title = "Auto Boss (Coming Soon)",
+        Callback = function()
+            LunoLibrary:Notify({
+                Title = "Bosses",
+                Content = "Fitur Auto Boss belum tersedia.",
+                Duration = 3
+            })
+        end
+    })
 end
