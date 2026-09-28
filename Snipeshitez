@@ -75,6 +75,8 @@ do
     -- Konstanta fix (tidak bisa diubah via UI)
     local ATTACK_DELAY = 1
     local MAX_LEVEL_GAP_ABOVE = 1
+    local MAX_WIN_STREAK = 5
+    local MIN_HEALTH_TO_RESUME = 30
 
     local FightTab = LunoLibrary:CreateTab("Fight & Bosses")
 
@@ -144,9 +146,9 @@ do
         return nil
     end
 
-    -- Ambil stamina player dari UI, format "X/Y" -> ambil X saja (angka depan)
-    -- Y (kapasitas max) diabaikan karena bisa berubah-ubah via upgrade
-    local function GetMyStamina(debugMode)
+    -- Generic function untuk baca bar format "X/Y" (dipakai untuk Stamina & Health)
+    -- Return current value (angka depan slash), ignore max value (angka belakang)
+    local function ReadBarValue(barName, debugMode)
         local debugLog = {}
 
         local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
@@ -165,27 +167,26 @@ do
         end
         table.insert(debugLog, "MafiaWarsUI: OK")
 
-        local staminaValue = SafeIndex(mafiaUI, "Root", "TopBar", "BarsCluster", "StaminaBar", "Value")
+        local barValue = SafeIndex(mafiaUI, "Root", "TopBar", "BarsCluster", barName, "Value")
 
-        if staminaValue then
-            table.insert(debugLog, "StaminaBar.Value (exact path): OK")
+        if barValue then
+            table.insert(debugLog, barName .. ".Value (exact path): OK")
         else
-            table.insert(debugLog, "StaminaBar.Value (exact path): FAILED, trying fallback search...")
-            staminaValue = FindDescendantByName(mafiaUI, "StaminaBar")
-            if staminaValue then
-                staminaValue = staminaValue:FindFirstChild("Value") or staminaValue
-                table.insert(debugLog, "StaminaBar (fallback search): OK")
+            table.insert(debugLog, barName .. ".Value (exact path): FAILED, trying fallback search...")
+            local barRoot = FindDescendantByName(mafiaUI, barName)
+            if barRoot then
+                barValue = barRoot:FindFirstChild("Value") or barRoot
+                table.insert(debugLog, barName .. " (fallback search): OK")
             else
-                table.insert(debugLog, "StaminaBar: NOT FOUND")
+                table.insert(debugLog, barName .. ": NOT FOUND")
                 if debugMode then return nil, debugLog end
                 return nil
             end
         end
 
-        -- Cari semua descendant + diri sendiri yang punya Text berformat "X/Y"
         local candidates = {}
 
-        local okSelf, selfText = pcall(function() return staminaValue.Text end)
+        local okSelf, selfText = pcall(function() return barValue.Text end)
         if okSelf and selfText then
             local currentStr, maxStr = tostring(selfText):match("^%s*(%d+)%s*/%s*(%d+)%s*$")
             if currentStr then
@@ -193,7 +194,7 @@ do
             end
         end
 
-        local allDescendants = staminaValue:GetDescendants()
+        local allDescendants = barValue:GetDescendants()
         for _, desc in ipairs(allDescendants) do
             local ok, txt = pcall(function() return desc.Text end)
             if ok and txt then
@@ -211,7 +212,7 @@ do
 
         if #candidates > 0 then
             local chosen = candidates[1]
-            table.insert(debugLog, "Chosen Stamina Current: " .. chosen.current .. " (Max: " .. chosen.max .. ", from " .. chosen.name .. ")")
+            table.insert(debugLog, "Chosen Current Value: " .. chosen.current .. " (Max: " .. chosen.max .. ", from " .. chosen.name .. ")")
             if debugMode then return chosen.current, debugLog end
             return chosen.current
         end
@@ -219,6 +220,14 @@ do
         table.insert(debugLog, "No 'X/Y' format text found!")
         if debugMode then return nil, debugLog end
         return nil
+    end
+
+    local function GetMyStamina(debugMode)
+        return ReadBarValue("StaminaBar", debugMode)
+    end
+
+    local function GetMyHealth(debugMode)
+        return ReadBarValue("HealthBar", debugMode)
     end
 
     -- Ambil hit list dari server (pakai JOB_HASH sebagai session id)
@@ -234,7 +243,7 @@ do
     end
 
     -- Serang target (pakai JOB_HASH sebagai session id)
-    -- Return: success (boolean), battleResult (table berisi won, dmgDealt, xpEstimate, dll)
+    -- Return: invokeSuccess (boolean), battleResult (table lengkap termasuk ok, won, msg, dll)
     local function AttackPlayer(targetUserId)
         if not AttackEvent then return false, nil end
         local ok, result = pcall(function()
@@ -246,10 +255,21 @@ do
         return false, nil
     end
 
+    -- Cek apakah battleResult menunjukkan status hospitalized
+    local function IsHospitalized(battleResult)
+        if not battleResult then return false end
+        if battleResult.ok == false and battleResult.msg then
+            local msgLower = tostring(battleResult.msg):lower()
+            if msgLower:find("hospitalized") then
+                return true
+            end
+        end
+        return false
+    end
+
     -- Cari target valid berdasarkan aturan level:
     -- 1. Kalau target level <= level kita -> SELALU VALID, tanpa batas gap
     -- 2. Kalau target level > level kita -> VALID hanya jika selisih <= MAX_LEVEL_GAP_ABOVE (fix = 1)
-    -- Prioritas: ambil target dengan level TERTINGGI yang masih valid (maksimalkan respect/reward)
     local function FindValidTarget(list, myLevel)
         local bestTarget = nil
 
@@ -283,13 +303,17 @@ do
     local function FormatBattleReport(battleResult)
         if not battleResult then return "Tidak ada data hasil pertarungan." end
 
+        if battleResult.ok == false then
+            return "GAGAL: " .. tostring(battleResult.msg or "Unknown error")
+        end
+
         local status = battleResult.won and "MENANG" or "KALAH"
         local lines = {
             status .. " vs " .. tostring(battleResult.targetName) .. " (Lv." .. tostring(battleResult.targetLevel) .. ")",
             "DMG Dealt: " .. tostring(battleResult.dmgDealt) .. " | DMG Taken: " .. tostring(battleResult.dmgTaken),
             "XP: " .. tostring(battleResult.xp or battleResult.xpEstimate),
-            "Respect Estimate: " .. tostring(battleResult.respectEstimate),
-            "Cash Estimate: " .. tostring(battleResult.cashEstimate),
+            "Respect: " .. tostring(battleResult.respectEstimate or battleResult.respect),
+            "Cash: " .. tostring(battleResult.cashEstimate or battleResult.stolen),
             "Stamina Cost: " .. tostring(battleResult.staminaCost),
         }
         if battleResult.knockout then
@@ -300,10 +324,39 @@ do
 
     local AutoAttackEnabled = false
     local WasWaitingForStamina = false
+    local WasWaitingForHealth = false
 
     local function AutoAttackLoop()
+        local currentTarget = nil
+        local winStreak = 0
+
         while AutoAttackEnabled do
-            -- Cek stamina dulu sebelum lakukan apapun
+            -- 1. Cek Health dulu (prioritas paling atas, kalau hospitalized semua harus berhenti)
+            local myHealth = GetMyHealth(false)
+
+            if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
+                if not WasWaitingForHealth then
+                    LunoLibrary:Notify({
+                        Title = "Auto Attack",
+                        Content = "Health rendah (" .. tostring(myHealth) .. "), menunggu regen ke atas " .. MIN_HEALTH_TO_RESUME .. "...",
+                        Duration = 3
+                    })
+                    WasWaitingForHealth = true
+                end
+                task.wait(ATTACK_DELAY)
+                continue
+            else
+                if WasWaitingForHealth then
+                    LunoLibrary:Notify({
+                        Title = "Auto Attack",
+                        Content = "Health sudah pulih! Melanjutkan serangan.",
+                        Duration = 2
+                    })
+                    WasWaitingForHealth = false
+                end
+            end
+
+            -- 2. Cek Stamina
             local myStamina = GetMyStamina(false)
 
             if myStamina ~= nil and myStamina <= 0 then
@@ -329,35 +382,80 @@ do
             end
 
             local myLevel = GetMyLevel()
-
             if not myLevel then
                 task.wait(ATTACK_DELAY)
                 continue
             end
 
-            local list = GetHitList(false)
-            local target = FindValidTarget(list, myLevel)
+            -- 3. Kalau belum ada target aktif, cari target baru
+            if not currentTarget then
+                local list = GetHitList(false)
+                local target = FindValidTarget(list, myLevel)
 
-            if not target then
-                list = GetHitList(true)
-                target = FindValidTarget(list, myLevel)
+                if not target then
+                    list = GetHitList(true)
+                    target = FindValidTarget(list, myLevel)
+                end
+
+                if target then
+                    currentTarget = target
+                    winStreak = 0
+                end
             end
 
-            if target then
-                local success, battleResult = AttackPlayer(target.userId)
-                if success and battleResult then
-                    LunoLibrary:Notify({
-                        Title = "Auto Attack",
-                        Content = FormatBattleReport(battleResult),
-                        Duration = 4
-                    })
-                    print("[AUTO ATTACK] " .. FormatBattleReport(battleResult):gsub("\n", " | "))
+            -- 4. Kalau ada target, serang
+            if currentTarget then
+                local invokeSuccess, battleResult = AttackPlayer(currentTarget.userId)
+
+                if invokeSuccess and battleResult then
+                    if IsHospitalized(battleResult) then
+                        LunoLibrary:Notify({
+                            Title = "Auto Attack",
+                            Content = "Kamu dihospitalisasi! " .. tostring(battleResult.msg),
+                            Duration = 3
+                        })
+                        -- Jangan reset currentTarget, biar lanjut nyerang target yang sama setelah heal
+                        -- Health check di iterasi berikutnya akan menahan loop sampai pulih
+                    elseif battleResult.ok == false then
+                        -- Error lain (target invalid, dsb) -> reset, cari target baru
+                        LunoLibrary:Notify({
+                            Title = "Auto Attack",
+                            Content = "Gagal menyerang: " .. tostring(battleResult.msg or "Unknown error"),
+                            Duration = 3
+                        })
+                        currentTarget = nil
+                        winStreak = 0
+                    else
+                        -- ok == true, cek won/lose
+                        LunoLibrary:Notify({
+                            Title = "Auto Attack",
+                            Content = FormatBattleReport(battleResult),
+                            Duration = 3
+                        })
+                        print("[AUTO ATTACK] " .. FormatBattleReport(battleResult):gsub("\n", " | "))
+
+                        if battleResult.won then
+                            winStreak = winStreak + 1
+                            if winStreak >= MAX_WIN_STREAK then
+                                LunoLibrary:Notify({
+                                    Title = "Auto Attack",
+                                    Content = "Sudah " .. MAX_WIN_STREAK .. "x menang vs " .. tostring(currentTarget.name) .. ", mencari lawan baru...",
+                                    Duration = 3
+                                })
+                                currentTarget = nil
+                                winStreak = 0
+                            end
+                            -- kalau belum capai 5x, currentTarget tetap sama -> loop berikutnya serang lagi
+                        else
+                            -- kalah -> cari lawan baru
+                            currentTarget = nil
+                            winStreak = 0
+                        end
+                    end
                 else
-                    LunoLibrary:Notify({
-                        Title = "Auto Attack",
-                        Content = "Gagal menyerang " .. tostring(target.name),
-                        Duration = 2
-                    })
+                    -- Invoke gagal total (network error dll)
+                    currentTarget = nil
+                    winStreak = 0
                 end
             else
                 LunoLibrary:Notify({
@@ -369,13 +467,15 @@ do
 
             task.wait(ATTACK_DELAY)
         end
+
         WasWaitingForStamina = false
+        WasWaitingForHealth = false
     end
 
     FightTab:CreateSection("Auto Attack")
 
     FightTab:CreateToggle({
-        Title = "Auto Attack (Smart Level + Stamina Targeting)",
+        Title = "Auto Attack (Smart Level + Stamina + Health + Repeat 5x)",
         Default = false,
         Flag = "AutoAttackLowerLevel",
         Callback = function(State)
@@ -389,6 +489,16 @@ do
     FightTab:CreateButton({
         Title = "Test Attack (Manual Trigger Sekali Jalan)",
         Callback = function()
+            local myHealth = GetMyHealth(false)
+            if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
+                LunoLibrary:Notify({
+                    Title = "Test Attack",
+                    Content = "Health kamu rendah (" .. tostring(myHealth) .. "), tunggu regen dulu!",
+                    Duration = 3
+                })
+                return
+            end
+
             local myStamina = GetMyStamina(false)
             if myStamina ~= nil and myStamina <= 0 then
                 LunoLibrary:Notify({
@@ -411,7 +521,7 @@ do
 
             LunoLibrary:Notify({
                 Title = "Test Attack",
-                Content = "Level: " .. tostring(myLevel) .. " | Stamina: " .. tostring(myStamina) .. " | Mengambil hit list...",
+                Content = "Level: " .. tostring(myLevel) .. " | Stamina: " .. tostring(myStamina) .. " | Health: " .. tostring(myHealth) .. " | Mengambil hit list...",
                 Duration = 2
             })
 
@@ -443,9 +553,9 @@ do
 
             print("[TEST ATTACK] Target ditemukan: " .. target.name .. " (Lv." .. target.level .. ", userId: " .. target.userId .. ")")
 
-            local success, battleResult = AttackPlayer(target.userId)
+            local invokeSuccess, battleResult = AttackPlayer(target.userId)
 
-            if success and battleResult then
+            if invokeSuccess and battleResult then
                 LunoLibrary:Notify({
                     Title = "Test Attack Result",
                     Content = FormatBattleReport(battleResult),
@@ -461,6 +571,42 @@ do
                     Duration = 4
                 })
             end
+        end
+    })
+
+    FightTab:CreateSection("Debug")
+
+    FightTab:CreateButton({
+        Title = "Debug Stamina Detection (Cek Console)",
+        Callback = function()
+            local stamina, log = GetMyStamina(true)
+            print("========== LUNO STAMINA DEBUG ==========")
+            for _, line in ipairs(log) do
+                print(line)
+            end
+            print("=========================================")
+            LunoLibrary:Notify({
+                Title = "Debug Stamina",
+                Content = stamina and ("Stamina saat ini: " .. tostring(stamina)) or "Gagal! Cek F9 Console untuk detail",
+                Duration = 4
+            })
+        end
+    })
+
+    FightTab:CreateButton({
+        Title = "Debug Health Detection (Cek Console)",
+        Callback = function()
+            local health, log = GetMyHealth(true)
+            print("========== LUNO HEALTH DEBUG ==========")
+            for _, line in ipairs(log) do
+                print(line)
+            end
+            print("========================================")
+            LunoLibrary:Notify({
+                Title = "Debug Health",
+                Content = health and ("Health saat ini: " .. tostring(health)) or "Gagal! Cek F9 Console untuk detail",
+                Duration = 4
+            })
         end
     })
 
