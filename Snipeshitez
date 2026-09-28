@@ -63,7 +63,7 @@ for i, feature in ipairs(FeatureModules) do
 end
 
 ----------------------------------------------------------------
--- [[ FIGHT & BOSSES TAB - AUTO ATTACK SYSTEM ]]
+-- [[ FIGHT & BOSSES TAB - AUTO ATTACK & AUTO BOSS SYSTEM ]]
 ----------------------------------------------------------------
 do
     local Players           = game:GetService("Players")
@@ -78,14 +78,21 @@ do
     local MAX_WIN_STREAK = 5
     local MIN_HEALTH_TO_RESUME = 30
 
+    -- List boss yang bisa diserang otomatis (tambahkan sendiri disini)
+    local BOSS_LIST = {
+        "boss_rizzo",
+        "boss_marchese",
+    }
+
     local FightTab = LunoLibrary:CreateTab("Fight & Bosses")
 
     -- Cache remotes (pcall biar ga hard error kalau path beda)
-    local MWRemotes, GetHitListEvent, AttackEvent
+    local MWRemotes, GetHitListEvent, AttackEvent, BossActionEvent
     pcall(function()
         MWRemotes       = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes")
         GetHitListEvent = MWRemotes:WaitForChild("GetHitList")
         AttackEvent     = MWRemotes:WaitForChild("Attack")
+        BossActionEvent = MWRemotes:WaitForChild("BossAction")
     end)
 
     -- Safe index chain (tidak error kalau salah satu step nil)
@@ -242,7 +249,7 @@ do
         return {}
     end
 
-    -- Serang target (pakai JOB_HASH sebagai session id)
+    -- Serang target player (pakai JOB_HASH sebagai session id)
     -- Return: invokeSuccess (boolean), battleResult (table lengkap termasuk ok, won, msg, dll)
     local function AttackPlayer(targetUserId)
         if not AttackEvent then return false, nil end
@@ -255,12 +262,37 @@ do
         return false, nil
     end
 
-    -- Cek apakah battleResult menunjukkan status hospitalized
-    local function IsHospitalized(battleResult)
-        if not battleResult then return false end
-        if battleResult.ok == false and battleResult.msg then
-            local msgLower = tostring(battleResult.msg):lower()
+    -- Serang boss (pakai JOB_HASH sebagai session id)
+    -- Return: invokeSuccess (boolean), bossResult (table berisi ok, msg, dll)
+    local function AttackBoss(bossId)
+        if not BossActionEvent then return false, nil end
+        local ok, result = pcall(function()
+            return table.pack(BossActionEvent:InvokeServer(JOB_HASH, "attack", bossId))
+        end)
+        if ok and result[1] then
+            return true, result[1]
+        end
+        return false, nil
+    end
+
+    -- Cek apakah battleResult/bossResult menunjukkan status hospitalized
+    local function IsHospitalized(result)
+        if not result then return false end
+        if result.ok == false and result.msg then
+            local msgLower = tostring(result.msg):lower()
             if msgLower:find("hospitalized") then
+                return true
+            end
+        end
+        return false
+    end
+
+    -- Cek apakah bossResult menunjukkan boss sedang recovering (sudah diselesaikan / cooldown)
+    local function IsBossRecovering(result)
+        if not result then return false end
+        if result.ok == false and result.msg then
+            local msgLower = tostring(result.msg):lower()
+            if msgLower:find("recovering") then
                 return true
             end
         end
@@ -322,6 +354,26 @@ do
         return table.concat(lines, "\n")
     end
 
+    -- Format hasil boss attack jadi string enak dibaca
+    local function FormatBossReport(bossId, bossResult)
+        if not bossResult then return "Tidak ada data hasil serangan boss." end
+
+        if bossResult.ok == false then
+            return bossId .. " -> GAGAL: " .. tostring(bossResult.msg or "Unknown error")
+        end
+
+        local lines = { bossId .. " -> Serangan berhasil dikirim." }
+        for key, val in pairs(bossResult) do
+            if key ~= "ok" then
+                table.insert(lines, tostring(key) .. ": " .. tostring(val))
+            end
+        end
+        return table.concat(lines, "\n")
+    end
+
+    ----------------------------------------------------------------
+    -- AUTO ATTACK PLAYER LOOP
+    ----------------------------------------------------------------
     local AutoAttackEnabled = false
     local WasWaitingForStamina = false
     local WasWaitingForHealth = false
@@ -331,7 +383,6 @@ do
         local winStreak = 0
 
         while AutoAttackEnabled do
-            -- 1. Cek Health dulu (prioritas paling atas, kalau hospitalized semua harus berhenti)
             local myHealth = GetMyHealth(false)
 
             if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
@@ -356,7 +407,6 @@ do
                 end
             end
 
-            -- 2. Cek Stamina
             local myStamina = GetMyStamina(false)
 
             if myStamina ~= nil and myStamina <= 0 then
@@ -387,7 +437,6 @@ do
                 continue
             end
 
-            -- 3. Kalau belum ada target aktif, cari target baru
             if not currentTarget then
                 local list = GetHitList(false)
                 local target = FindValidTarget(list, myLevel)
@@ -403,7 +452,6 @@ do
                 end
             end
 
-            -- 4. Kalau ada target, serang
             if currentTarget then
                 local invokeSuccess, battleResult = AttackPlayer(currentTarget.userId)
 
@@ -414,10 +462,7 @@ do
                             Content = "Kamu dihospitalisasi! " .. tostring(battleResult.msg),
                             Duration = 3
                         })
-                        -- Jangan reset currentTarget, biar lanjut nyerang target yang sama setelah heal
-                        -- Health check di iterasi berikutnya akan menahan loop sampai pulih
                     elseif battleResult.ok == false then
-                        -- Error lain (target invalid, dsb) -> reset, cari target baru
                         LunoLibrary:Notify({
                             Title = "Auto Attack",
                             Content = "Gagal menyerang: " .. tostring(battleResult.msg or "Unknown error"),
@@ -426,7 +471,6 @@ do
                         currentTarget = nil
                         winStreak = 0
                     else
-                        -- ok == true, cek won/lose
                         LunoLibrary:Notify({
                             Title = "Auto Attack",
                             Content = FormatBattleReport(battleResult),
@@ -445,15 +489,12 @@ do
                                 currentTarget = nil
                                 winStreak = 0
                             end
-                            -- kalau belum capai 5x, currentTarget tetap sama -> loop berikutnya serang lagi
                         else
-                            -- kalah -> cari lawan baru
                             currentTarget = nil
                             winStreak = 0
                         end
                     end
                 else
-                    -- Invoke gagal total (network error dll)
                     currentTarget = nil
                     winStreak = 0
                 end
@@ -471,6 +512,105 @@ do
         WasWaitingForStamina = false
         WasWaitingForHealth = false
     end
+
+    ----------------------------------------------------------------
+    -- AUTO BOSS LOOP
+    ----------------------------------------------------------------
+    local AutoBossEnabled = false
+    local WasWaitingForBossHealth = false
+
+    local function AutoBossLoop()
+        local bossIndex = 1
+
+        while AutoBossEnabled do
+            if bossIndex > #BOSS_LIST then
+                LunoLibrary:Notify({
+                    Title = "Auto Boss",
+                    Content = "Semua boss dalam list sudah diserang! Auto Boss selesai.",
+                    Duration = 4
+                })
+                AutoBossEnabled = false
+                break
+            end
+
+            local currentBoss = BOSS_LIST[bossIndex]
+
+            -- Cek health dulu
+            local myHealth = GetMyHealth(false)
+            if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
+                if not WasWaitingForBossHealth then
+                    LunoLibrary:Notify({
+                        Title = "Auto Boss",
+                        Content = "Health rendah (" .. tostring(myHealth) .. "), menunggu regen ke atas " .. MIN_HEALTH_TO_RESUME .. "...",
+                        Duration = 3
+                    })
+                    WasWaitingForBossHealth = true
+                end
+                task.wait(ATTACK_DELAY)
+                continue
+            else
+                if WasWaitingForBossHealth then
+                    LunoLibrary:Notify({
+                        Title = "Auto Boss",
+                        Content = "Health sudah pulih! Melanjutkan serangan boss.",
+                        Duration = 2
+                    })
+                    WasWaitingForBossHealth = false
+                end
+            end
+
+            local invokeSuccess, bossResult = AttackBoss(currentBoss)
+
+            if invokeSuccess and bossResult then
+                if IsHospitalized(bossResult) then
+                    LunoLibrary:Notify({
+                        Title = "Auto Boss",
+                        Content = "Kamu dihospitalisasi saat lawan " .. currentBoss .. "! " .. tostring(bossResult.msg),
+                        Duration = 3
+                    })
+                    -- tetap di boss yang sama, tunggu health pulih di iterasi berikutnya
+                elseif IsBossRecovering(bossResult) then
+                    LunoLibrary:Notify({
+                        Title = "Auto Boss",
+                        Content = currentBoss .. " sedang recovering, skip ke boss berikutnya. (" .. tostring(bossResult.msg) .. ")",
+                        Duration = 3
+                    })
+                    print("[AUTO BOSS] Skip " .. currentBoss .. " -> " .. tostring(bossResult.msg))
+                    bossIndex = bossIndex + 1
+                elseif bossResult.ok == false then
+                    LunoLibrary:Notify({
+                        Title = "Auto Boss",
+                        Content = "Gagal menyerang " .. currentBoss .. ": " .. tostring(bossResult.msg or "Unknown error"),
+                        Duration = 3
+                    })
+                    print("[AUTO BOSS] Error di " .. currentBoss .. " -> " .. tostring(bossResult.msg))
+                    bossIndex = bossIndex + 1
+                else
+                    LunoLibrary:Notify({
+                        Title = "Auto Boss",
+                        Content = FormatBossReport(currentBoss, bossResult),
+                        Duration = 3
+                    })
+                    print("[AUTO BOSS] " .. FormatBossReport(currentBoss, bossResult):gsub("\n", " | "))
+                end
+            else
+                LunoLibrary:Notify({
+                    Title = "Auto Boss",
+                    Content = "Invoke gagal untuk " .. currentBoss,
+                    Duration = 3
+                })
+                bossIndex = bossIndex + 1
+            end
+
+            task.wait(ATTACK_DELAY)
+        end
+
+        WasWaitingForBossHealth = false
+    end
+
+    ----------------------------------------------------------------
+    -- UI SECTIONS
+    ----------------------------------------------------------------
 
     FightTab:CreateSection("Auto Attack")
 
@@ -612,14 +752,52 @@ do
 
     FightTab:CreateSection("Bosses")
 
+    FightTab:CreateToggle({
+        Title = "Auto Boss (Serang Semua Boss di List Otomatis)",
+        Default = false,
+        Flag = "AutoBossEnabled",
+        Callback = function(State)
+            AutoBossEnabled = State
+            if State then
+                task.spawn(AutoBossLoop)
+            end
+        end
+    })
+
     FightTab:CreateButton({
-        Title = "Auto Boss (Coming Soon)",
+        Title = "Debug Attack Boss: boss_marchese",
         Callback = function()
-            LunoLibrary:Notify({
-                Title = "Bosses",
-                Content = "Fitur Auto Boss belum tersedia.",
-                Duration = 3
-            })
+            local myHealth = GetMyHealth(false)
+            if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
+                LunoLibrary:Notify({
+                    Title = "Debug Boss Attack",
+                    Content = "Health kamu rendah (" .. tostring(myHealth) .. "), tunggu regen dulu!",
+                    Duration = 3
+                })
+                return
+            end
+
+            local invokeSuccess, bossResult = AttackBoss("boss_marchese")
+
+            print("========== DEBUG BOSS ATTACK: boss_marchese ==========")
+            if invokeSuccess and bossResult then
+                for key, val in pairs(bossResult) do
+                    print("  " .. tostring(key) .. ": " .. tostring(val))
+                end
+                LunoLibrary:Notify({
+                    Title = "Debug Boss Attack",
+                    Content = FormatBossReport("boss_marchese", bossResult),
+                    Duration = 5
+                })
+            else
+                print("  Invoke gagal total!")
+                LunoLibrary:Notify({
+                    Title = "Debug Boss Attack",
+                    Content = "Invoke gagal untuk boss_marchese!",
+                    Duration = 4
+                })
+            end
+            print("========================================================")
         end
     })
 end
