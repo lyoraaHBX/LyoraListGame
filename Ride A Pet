@@ -1,0 +1,1082 @@
+local LunoLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
+
+local Players, RS, UIS = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
+local TS, R, HS, VU = game:GetService("TweenService"), game:GetService("ReplicatedStorage"), game:GetService("HttpService"), game:GetService("VirtualUser")
+local pl, pg = Players.LocalPlayer, Players.LocalPlayer:WaitForChild("PlayerGui")
+local EF = workspace:WaitForChild("RenderedEggs")
+local K, CN = false, {}
+AG_TARGET = nil
+AG_TARGETS = {}
+AG_TARGET_IDX = 1
+AG_EGGS = nil
+
+local function C(c) CN[#CN+1] = c; return c end
+local SAVE = "MacHx_Save.json"
+local function saveD(t) if writefile then pcall(writefile, SAVE, HS:JSONEncode(t)) end end
+local function loadD()
+    if readfile and isfile then
+        local o, r = pcall(function() if isfile(SAVE) then return readfile(SAVE) end end)
+        if o and r then local o2, d = pcall(HS.JSONDecode, HS, r) if o2 and type(d) == "table" then return d end end
+    end
+    return {}
+end
+local SV = loadD()
+local ALL_EGGS = {"White Egg","Brown Egg","Cracked Egg","Easter Egg","Stone Egg","Leaf Egg","Mushroom Egg","Flower Egg","Slime Egg","Ice Egg","Glass Egg","Golden Egg","Diamond Egg","Crystal Egg","Skull Egg","Asteroid Egg","Dominus Egg","Flaming Egg","Sinister Egg","Soul Egg","Tidal Egg","Aurora Egg","Galaxy Egg","Bloom Egg","Blackhole Egg","Solaris Egg","Cherub Egg","Volcanic Egg"}
+local SYS = SV.SYS ~= false
+local LM = SV.LM ~= false
+local EE = SV.EE ~= false
+local SP = SV.SP or 80
+local WN = SV.WN or 15
+local WT = SV.WT or 13
+local VR = SV.VR or 30
+local PR = SV.PR or 30
+local AE = SV.AE or {["cherub egg"]=true,["blackhole egg"]=true,["galaxy egg"]=true,["volcanic egg"]=true,["solaris egg"]=true}
+local SE = SV.SE or {}
+local PL = SV.PL or {"volcanic","cherub","solaris","blackhole"}
+AG_EGGS = SV.AG_EGGS or {"volcanic","cherub","solaris","blackhole"}
+local noclipEnabled = SV.noclip or false
+local infJumpEnabled = SV.infJump or false
+local ANTI_AFK = SV.antiAfk ~= false
+local HIDE_NOTIF = SV.hideNotif or false
+
+function normKey(name)
+    local s = tostring(name or ""):lower()
+    s = s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    return s:gsub(" egg$", "")
+end
+
+local FIXED_ORDER = {volcanic=1, cherub=2, solaris=3, blackhole=4}
+function resortList(lst)
+    local fixed, others, seen = {}, {}, {}
+    for _, k in ipairs(lst) do
+        local n = normKey(k)
+        if n ~= "" and not seen[n] then
+            seen[n] = true
+            if FIXED_ORDER[n] then fixed[#fixed+1] = {key=n, rank=FIXED_ORDER[n]}
+            else others[#others+1] = n end
+        end
+    end
+    table.sort(fixed, function(a,b) return a.rank < b.rank end)
+    local out = {}
+    for _, item in ipairs(fixed) do out[#out+1] = item.key end
+    for _, n in ipairs(others) do out[#out+1] = n end
+    return out
+end
+
+function findPlayerByNameG(name)
+    if not name then return nil end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Name == name or p.DisplayName == name then return p end
+    end
+    return nil
+end
+
+do
+    local cleaned = {}
+    for k, v in pairs(AE) do local n = normKey(k) if n ~= "" then cleaned[n] = v end end
+    AE = cleaned
+end
+PL = resortList(PL)
+AG_EGGS = resortList(AG_EGGS)
+
+local function saveAll()
+    saveD({SYS=SYS,LM=LM,EE=EE,SP=SP,WN=WN,WT=WT,VR=VR,PR=PR,AE=AE,SE=SE,PL=PL,AG_EGGS=AG_EGGS,noclip=noclipEnabled,infJump=infJumpEnabled,antiAfk=ANTI_AFK,hideNotif=HIDE_NOTIF})
+end
+
+for _, o in ipairs(EF:GetDescendants()) do
+    if o:IsA("ProximityPrompt") then o.HoldDuration = 0; o.RequiresLineOfSight = false end
+end
+C(EF.DescendantAdded:Connect(function(o)
+    if K then return end
+    if o:IsA("ProximityPrompt") then o.HoldDuration = 0; o.RequiresLineOfSight = false end
+end))
+local P1 = Vector3.new(-4914.52100, 41295.43359, -3705.13477)
+local P3 = Vector3.new(-4968.01562, 41281.78906, -3650.59204)
+local busy = false
+C(RS.Stepped:Connect(function()
+    if K or not noclipEnabled or not pl.Character then return end
+    for _, v in pairs(pl.Character:GetDescendants()) do
+        if v:IsA("BasePart") and v.CanCollide then v.CanCollide = false end
+    end
+end))
+C(UIS.JumpRequest:Connect(function()
+    if K or not infJumpEnabled or not pl.Character then return end
+    local h = pl.Character:FindFirstChildOfClass("Humanoid")
+    if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+end))
+C(pl.Idled:Connect(function()
+    if K or not ANTI_AFK then return end
+    pcall(function() VU:CaptureController(); VU:ClickButton2(Vector2.new()) end)
+end))
+
+local NotifGui = Instance.new("ScreenGui")
+NotifGui.Name = "MacHxNotifs"
+NotifGui.ResetOnSpawn = false
+NotifGui.IgnoreGuiInset = true
+NotifGui.DisplayOrder = 9999
+NotifGui.Parent = pg
+local Holder = Instance.new("Frame")
+Holder.AnchorPoint = Vector2.new(1,0)
+Holder.Position = UDim2.new(1,-20,0,20)
+Holder.Size = UDim2.new(0,340,1,-40)
+Holder.BackgroundTransparency = 1
+Holder.Parent = NotifGui
+local NL = Instance.new("UIListLayout", Holder)
+NL.Padding = UDim.new(0,10)
+NL.SortOrder = Enum.SortOrder.LayoutOrder
+NL.VerticalAlignment = Enum.VerticalAlignment.Top
+NL.HorizontalAlignment = Enum.HorizontalAlignment.Right
+local PRS = {
+    info={C=Color3.fromRGB(90,140,255),I="i",L="INFO"},
+    success={C=Color3.fromRGB(0,220,120),I="✓",L="SUCCESS"},
+    warning={C=Color3.fromRGB(255,180,0),I="!",L="WARNING"},
+    error={C=Color3.fromRGB(255,60,60),I="✕",L="ERROR"},
+    system={C=Color3.fromRGB(180,90,255),I="★",L="MacHx"}
+}
+local function note(msg, t)
+    if K or HIDE_NOTIF then return end
+    t = t or "info"
+    local p = PRS[t] or PRS.info
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1,0,0,66)
+    f.BackgroundColor3 = Color3.fromRGB(18,16,28)
+    f.BackgroundTransparency = 0.05
+    f.BorderSizePixel = 0
+    f.Position = UDim2.new(1,380,0,0)
+    f.Parent = Holder
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0,10)
+    local s = Instance.new("UIStroke", f)
+    s.Color = p.C; s.Thickness = 1.5; s.Transparency = 0.4
+    local bar = Instance.new("Frame", f)
+    bar.Size = UDim2.new(0,4,1,-12); bar.Position = UDim2.new(0,6,0,6)
+    bar.BackgroundColor3 = p.C; bar.BorderSizePixel = 0
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
+    local ic = Instance.new("TextLabel", f)
+    ic.Size = UDim2.new(0,34,0,34); ic.Position = UDim2.new(0,18,0,16)
+    ic.BackgroundColor3 = p.C; ic.BackgroundTransparency = 0.85
+    ic.Text = p.I; ic.TextColor3 = p.C; ic.TextSize = 22; ic.Font = Enum.Font.GothamBlack
+    Instance.new("UICorner", ic).CornerRadius = UDim.new(1,0)
+    local ti = Instance.new("TextLabel", f)
+    ti.Position = UDim2.new(0,62,0,8); ti.Size = UDim2.new(1,-78,0,16)
+    ti.BackgroundTransparency = 1
+    ti.Text = "MacHx  •  " .. p.L
+    ti.TextColor3 = p.C; ti.Font = Enum.Font.GothamBold; ti.TextSize = 11
+    ti.TextXAlignment = Enum.TextXAlignment.Left
+    local bo = Instance.new("TextLabel", f)
+    bo.Position = UDim2.new(0,62,0,26); bo.Size = UDim2.new(1,-78,0,34)
+    bo.BackgroundTransparency = 1; bo.Text = tostring(msg)
+    bo.TextColor3 = Color3.fromRGB(230,225,245); bo.Font = Enum.Font.Gotham
+    bo.TextSize = 13; bo.TextXAlignment = Enum.TextXAlignment.Left
+    bo.TextYAlignment = Enum.TextYAlignment.Top; bo.TextWrapped = true
+    local pr = Instance.new("Frame", f)
+    pr.Size = UDim2.new(1,-14,0,2); pr.Position = UDim2.new(0,7,1,-5)
+    pr.BackgroundColor3 = p.C; pr.BorderSizePixel = 0
+    Instance.new("UICorner", pr).CornerRadius = UDim.new(1,0)
+    TS:Create(f, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position=UDim2.new(0,0,0,0)}):Play()
+    TS:Create(pr, TweenInfo.new(5, Enum.EasingStyle.Linear), {Size=UDim2.new(0,0,0,2)}):Play()
+    task.delay(5, function()
+        if not f.Parent then return end
+        TS:Create(f, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position=UDim2.new(1,380,0,0), BackgroundTransparency=1}):Play()
+        TS:Create(s, TweenInfo.new(0.3), {Transparency=1}):Play()
+        task.wait(0.35); pcall(function() f:Destroy() end)
+    end)
+    local kids = {}
+    for _, c in ipairs(Holder:GetChildren()) do if c:IsA("Frame") then table.insert(kids, c) end end
+    if #kids > 6 then kids[1]:Destroy() end
+end
+local function info(m) note(m,"info") end
+local function ok(m) note(m,"success") end
+local function warn(m) note(m,"warning") end
+local function err(m) note(m,"error") end
+local function sys(m) note(m,"system") end
+
+local function nm(s) return tostring(s or ""):lower():gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","") end
+local function RT() local c = pl.Character return c and c:FindFirstChild("HumanoidRootPart") end
+local function GP(o)
+    if not o then return nil end
+    if o:IsA("BasePart") then return o.Position end
+    if o:IsA("Model") then
+        if o.PrimaryPart then return o.PrimaryPart.Position end
+        local s, p = pcall(function() return o:GetPivot() end)
+        if s then return p.Position end
+    end
+    local b = o:FindFirstChildWhichIsA("BasePart", true)
+    return b and b.Position
+end
+local function MT(e,k) return nm(e.Name):find(nm(k),1,true) ~= nil end
+local function TP(p) local r = RT() if not r then return false end r.CFrame = CFrame.new(p) return true end
+local function TW(p)
+    if not (SYS or AG_TARGET) then return false end
+    local r = RT() if not r then return false end
+    local d = (r.Position - p).Magnitude
+    if d <= 1 then return true end
+    local t = TS:Create(r, TweenInfo.new(d/SP, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {CFrame=CFrame.new(p)})
+    t:Play(); t.Completed:Wait()
+    return (SYS or AG_TARGET) and r.Parent ~= nil
+end
+
+local VOLCANO_TOP = Vector3.new(-5103.076, 41405.484, -3460.646)
+local function TT() local r = RT() if not r then return false end r.CFrame = CFrame.new(VOLCANO_TOP) return true end
+local function TP2() return VOLCANO_TOP end
+local function HoldAtTop(duration)
+    local endT = os.clock() + duration
+    while os.clock() < endT and not K do
+        local r = RT()
+        if not r then break end
+        local dist = (r.Position - VOLCANO_TOP).Magnitude
+        if dist > 0.5 then
+            local t = TS:Create(r, TweenInfo.new(dist / SP, Enum.EasingStyle.Linear), {CFrame = CFrame.new(VOLCANO_TOP)})
+            t:Play()
+            t.Completed:Wait()
+        else
+            r.CFrame = CFrame.new(VOLCANO_TOP)
+            RS.RenderStepped:Wait()
+        end
+    end
+end
+task.spawn(function() task.wait(2) sys("VolcanoTop set") end)
+
+local function FireDip()
+    local ok2 = pcall(function() R.packages.Net["RE/VolcanoDip"]:FireServer() end)
+    if ok2 then info("VolcanoDip fired") else warn("VolcanoDip failed") end
+    return ok2
+end
+
+local function findPlot(ownerPlayer)
+    if not ownerPlayer then return nil end
+    local ps = workspace:FindFirstChild("Plots")
+    if not ps then return nil end
+    for _, p in ipairs(ps:GetChildren()) do
+        local d = p:FindFirstChild("Data")
+        local o = d and d:FindFirstChild("Owner")
+        if o then
+            local m = false
+            if o:IsA("ObjectValue") then m = o.Value == ownerPlayer
+            elseif o:IsA("StringValue") then m = o.Value == ownerPlayer.Name or o.Value == ownerPlayer.DisplayName
+            elseif o:IsA("IntValue") or o:IsA("NumberValue") then m = o.Value == ownerPlayer.UserId end
+            if m then return p end
+        end
+    end
+    return nil
+end
+
+local function HM()
+    if AG_TARGET then
+        local plot = findPlot(AG_TARGET)
+        if not plot then
+            warn("Give: no plot for " .. AG_TARGET.Name)
+            return false
+        end
+        local r = RT()
+        if not r then
+            warn("Give: no root part")
+            return false
+        end
+        info("Going to " .. AG_TARGET.Name .. "'s plot")
+        r.CFrame = plot:GetPivot() + Vector3.new(0, 5, 0)
+        task.wait(0.5)
+        if not K then
+            local ok2 = pcall(function() R.Remotes.Game.BasketDrop:FireServer() end)
+            if ok2 then
+                ok("Given to " .. AG_TARGET.Name)
+            else
+                warn("BasketDrop failed")
+            end
+        end
+        return true
+    end
+    local plot = findPlot(pl)
+    if plot then
+        local r = RT()
+        if r then r.CFrame = plot:GetPivot() + Vector3.new(0,5,0) return true end
+    end
+    return false
+end
+
+local function FE()
+    local list = (AG_TARGET and AG_EGGS) or PL
+    if not list or #list == 0 then list = PL end
+    for _, k in ipairs(list) do
+        for _, e in ipairs(EF:GetChildren()) do
+            if MT(e, k) then return e, k end
+        end
+    end
+end
+local function WG(e) while (SYS or AG_TARGET) and not K and e and e.Parent do task.wait(0.5) end return e and not e.Parent end
+local function UQ()
+    task.wait(2)
+    local c = pl.Character local h = c and c:FindFirstChildOfClass("Humanoid")
+    if h then h:UnequipTools() end
+end
+
+local function pV(e)
+    if not e or not e.Parent or K or not TP(P1) then return end
+    local r = RT()
+    if r then r.Anchored = true info("P1 lock") task.wait(5) if r.Parent then r.Anchored = false end end
+    if not TW(P3) then return end
+    task.wait(0.2)
+    if not e.Parent then HM() return end
+    local p = GP(e) if not p then HM() return end
+    if not TW(p) then return end
+    local d = WG(e)
+    if not (SYS or AG_TARGET) or K then return end
+    if not d then HM() return end
+    ok("Volcanic gone")
+    TP(P3) task.wait(0.2)
+    if not TW(P1) then return end
+    task.wait(0.2)
+    if not TT() then HM() return end
+    info("At top")
+    task.wait(0.3)
+    if not K and LM then FireDip() end
+    HoldAtTop(math.max(WT - 0.3, 0))
+    HM() UQ()
+end
+
+local function pN(e)
+    if not e or not e.Parent or K then return end
+    local p = GP(e) if not p then HM() return end
+    if not TP(p) then return end
+    info("At egg")
+    while e and e.Parent and (SYS or AG_TARGET) and not K do
+        local cp = GP(e) if not cp then break end
+        local r = RT() if not r then break end
+        local d = (r.Position - cp).Magnitude
+        local t = TS:Create(r, TweenInfo.new(math.max(d/SP,0.05), Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {CFrame=CFrame.new(cp)})
+        t:Play(); t.Completed:Wait(); task.wait(0.05)
+    end
+    if not (SYS or AG_TARGET) or K then return end
+    ok("Egg gone")
+    if LM then
+        info("Top")
+        if TT() then
+            task.wait(0.3)
+            if not K then FireDip() end
+            HoldAtTop(math.max(WT - 0.3, 0))
+        end
+    end
+    HM() UQ()
+end
+
+task.spawn(function()
+    while not K do
+        if (SYS or AG_TARGET) and not busy then
+            local e, k = FE()
+            if e then
+                busy = true
+                if k == "volcanic" then pV(e) else pN(e) end
+                if (SYS or AG_TARGET) and not K then task.wait(WN) end
+                busy = false
+            else task.wait(1) end
+        else task.wait(0.2) end
+    end
+end)
+
+local wI = false
+C(RS.Heartbeat:Connect(function()
+    if K then wI = false return end
+    if not LM then wI = false return end
+    if not SYS and not AG_TARGET then wI = false return end
+    local r = RT()
+    local t2 = TP2()
+    if not r or not t2 then wI = false return end
+    local dist = (r.Position - t2).Magnitude
+    if dist <= VR and not wI then
+        wI = true
+        task.wait(0.3)
+        if K then return end
+        FireDip()
+    elseif dist > VR then
+        wI = false
+    end
+end))
+
+local WBEF, HD, RC = 3, 0, 3
+local pend = {}
+local function FP(e) for _, o in ipairs(e:GetDescendants()) do if o:IsA("ProximityPrompt") then return o end end end
+local function GPP(p, e)
+    if not p or not p.Parent then return nil end
+    if p.Parent:IsA("BasePart") then return p.Parent end
+    if e:IsA("BasePart") then return e end
+    return e:FindFirstChildWhichIsA("BasePart", true)
+end
+local function CL(e, p)
+    if not e or not p then return end
+    for _ = 1, RC do
+        if (not SYS and not AG_TARGET) or K or not e.Parent or not p.Parent then return end
+        local r = RT() local pp = GPP(p, e)
+        if not r or not pp then return end
+        if (r.Position - pp.Position).Magnitude > PR then return end
+        if p.Enabled then p:InputHoldBegin() task.wait(HD) if p.Parent then p:InputHoldEnd() end end
+        task.wait(0.1)
+    end
+end
+task.spawn(function()
+    while task.wait(0.1) do
+        if K then break end
+        if not SYS and not AG_TARGET then continue end
+        local r = RT() if not r then continue end
+        for _, e in ipairs(EF:GetChildren()) do
+            if e.Parent then
+                local p = FP(e)
+                if p then
+                    local pp = GPP(p, e)
+                    if pp and (r.Position - pp.Position).Magnitude <= PR and not pend[e] then
+                        pend[e] = true
+                        task.spawn(function()
+                            task.wait(WBEF)
+                            if (not SYS and not AG_TARGET) or K or not e.Parent or not p.Parent then pend[e] = nil return end
+                            local cr = RT() local cp = GPP(p, e)
+                            if not cr or not cp then pend[e] = nil return end
+                            if (cr.Position - cp.Position).Magnitude <= PR then CL(e, p) end
+                            pend[e] = nil
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end)
+C(EF.ChildRemoved:Connect(function(e) pend[e] = nil end))
+
+local EO = {}
+local function GEP(e)
+    if e:IsA("Model") then return e:GetPivot().Position end
+    if e:IsA("BasePart") then return e.Position end
+    local p = e:FindFirstChildWhichIsA("BasePart", true)
+    return p and p.Position
+end
+local function GKG(e)
+    local A = {"KG","Kg","kg","Weight","weight"}
+    for _, a in ipairs(A) do local v = e:GetAttribute(a) if v ~= nil then return tostring(v).." KG" end end
+    for _, n in ipairs(A) do local v = e:FindFirstChild(n, true) if v and v:IsA("ValueBase") then return tostring(v.Value).." KG" end end
+    return "KG: ?"
+end
+local function SESP(e)
+    local en = normKey(e.Name) if en == "" then return false end
+    for k, v in pairs(AE) do
+        if v then
+            local kn = normKey(k)
+            if kn ~= "" and (en == kn or en:find(kn, 1, true) or kn:find(en, 1, true)) then return true end
+        end
+    end
+    for k in pairs(SE) do
+        local kn = normKey(k)
+        if kn ~= "" and en:find(kn, 1, true) then return true end
+    end
+    return false
+end
+local function RE(e)
+    local d = EO[e] if not d then return end
+    if d.h then d.h:Destroy() end
+    if d.b then d.b:Destroy() end
+    EO[e] = nil
+end
+local function CE(e)
+    if not EE or EO[e] or not SESP(e) then return end
+    local h = Instance.new("Highlight")
+    h.Name = "EggESP" h.FillTransparency = 0.5 h.OutlineTransparency = 0 h.Parent = e
+    local b = Instance.new("BillboardGui")
+    b.Name = "EggESP" b.Size = UDim2.new(0,140,0,48) b.StudsOffset = Vector3.new(0,3,0) b.AlwaysOnTop = true b.Parent = e
+    local nl = Instance.new("TextLabel")
+    nl.Size = UDim2.new(1,0,0.34,0) nl.BackgroundTransparency = 1 nl.Text = e.Name nl.TextColor3 = Color3.new(1,1,1) nl.TextStrokeTransparency = 0 nl.TextScaled = true nl.Font = Enum.Font.GothamBold nl.Parent = b
+    local kl = Instance.new("TextLabel")
+    kl.Size = UDim2.new(1,0,0.33,0) kl.Position = UDim2.new(0,0,0.34,0) kl.BackgroundTransparency = 1 kl.Text = GKG(e) kl.TextColor3 = Color3.new(1,1,1) kl.TextStrokeTransparency = 0 kl.TextScaled = true kl.Font = Enum.Font.Gotham kl.Parent = b
+    local dl = Instance.new("TextLabel")
+    dl.Size = UDim2.new(1,0,0.33,0) dl.Position = UDim2.new(0,0,0.67,0) dl.BackgroundTransparency = 1 dl.Text = "0 studs" dl.TextColor3 = Color3.new(1,1,1) dl.TextStrokeTransparency = 0 dl.TextScaled = true dl.Font = Enum.Font.Gotham dl.Parent = b
+    EO[e] = {h=h, b=b, k=kl, d=dl}
+end
+local function DA() for e in pairs(EO) do RE(e) end end
+local function CA() if not EE then return end for _, e in ipairs(EF:GetChildren()) do CE(e) end end
+local function ReEvalESP()
+    local toRemove = {}
+    for e in pairs(EO) do if not e.Parent or not SESP(e) then toRemove[#toRemove+1] = e end end
+    for _, e in ipairs(toRemove) do RE(e) end
+end
+CA()
+C(EF.ChildAdded:Connect(function(e) if K then return end task.wait(0.1) if SESP(e) then CE(e) end end))
+C(EF.ChildRemoved:Connect(function(e) RE(e) end))
+C(RS.RenderStepped:Connect(function()
+    if K or not EE then return end
+    local c = pl.Character local r = c and c:FindFirstChild("HumanoidRootPart")
+    if not r then return end
+    for e, d in pairs(EO) do
+        if e.Parent then
+            d.k.Text = GKG(e)
+            local p = GEP(e)
+            if p then d.d.Text = string.format("%.0f studs", (r.Position - p).Magnitude) end
+        end
+    end
+end))
+
+------------------------------------------------------------
+-- ============= UI (LUNO LIBRARY) MULAI DI SINI =============
+------------------------------------------------------------
+
+local AG = false
+local AGSavedSYS = nil
+local SYS_FLAG = "MacHx_SystemEnabled"
+local AG_FLAG = "MacHx_AutoGiveEnabled"
+
+-- Buat Window Luno (CreateWindow otomatis nambah tab MISC & Config bawaan library)
+local UI = LunoLib:CreateWindow({
+    Title = "MacHx",
+    SubTitle = "Ride a Pet v1.5",
+    Discord = "https://discord.gg/machx"
+})
+
+local HomeTab     = UI:CreateTab("Home")
+local FarmTab     = UI:CreateTab("Farm")
+local ESPTab      = UI:CreateTab("ESP")
+local PresetsTab  = UI:CreateTab("Presets")
+local EventsTab   = UI:CreateTab("Events")
+local SettingsTab = UI:CreateTab("Settings")
+
+-- ===== HOME =====
+HomeTab:CreateSection("Character Modifications")
+HomeTab:CreateSlider({
+    Title = "WalkSpeed", Min = 16, Max = 250, Default = 16, Suffix = " spd", Flag = "MacHx_WalkSpeed",
+    Callback = function(v) local c = pl.Character local h = c and c:FindFirstChildOfClass("Humanoid") if h then h.WalkSpeed = v end end
+})
+HomeTab:CreateSlider({
+    Title = "JumpPower", Min = 50, Max = 500, Default = 50, Suffix = " pwr", Flag = "MacHx_JumpPower",
+    Callback = function(v) local c = pl.Character local h = c and c:FindFirstChildOfClass("Humanoid") if h then h.UseJumpPower = true; h.JumpPower = v end end
+})
+HomeTab:CreateToggle({
+    Title = "Noclip", Default = noclipEnabled, Flag = "MacHx_Noclip",
+    Callback = function(v) noclipEnabled = v; saveAll(); sys("Noclip " .. (v and "ON" or "OFF")) end
+})
+HomeTab:CreateToggle({
+    Title = "Infinite Jump", Default = infJumpEnabled, Flag = "MacHx_InfJump",
+    Callback = function(v) infJumpEnabled = v; saveAll(); sys("Inf Jump " .. (v and "ON" or "OFF")) end
+})
+HomeTab:CreateToggle({
+    Title = "Anti-AFK", Default = ANTI_AFK, Flag = "MacHx_AntiAFK",
+    Callback = function(v) ANTI_AFK = v; saveAll(); ok("Anti-AFK " .. (v and "ON" or "OFF")) end
+})
+
+HomeTab:CreateSection("Egg Inventory")
+local function cleanEggName(name)
+    local n = tostring(name or "")
+    n = n:gsub("%s+%d+%s*[Kk][Gg]?%s*$", "")
+    return n:gsub("%s+%d+%s*$", ""):gsub("%s+$", "")
+end
+local function countEggs()
+    local counts = {}
+    local containers = {}
+    local bp = pl:FindFirstChildOfClass("Backpack")
+    if bp then table.insert(containers, bp) end
+    if pl.Character then table.insert(containers, pl.Character) end
+    for _, c in ipairs(containers) do
+        for _, item in ipairs(c:GetChildren()) do
+            if item:IsA("Tool") and item.Name:lower():find("egg", 1, true) then
+                local base = cleanEggName(item.Name)
+                counts[base] = (counts[base] or 0) + 1
+            end
+        end
+    end
+    return counts
+end
+local invText = "(belum discan)"
+local function refreshInv()
+    local counts = countEggs()
+    local sorted, total = {}, 0
+    for name, count in pairs(counts) do table.insert(sorted, { name = name, count = count }) total = total + count end
+    table.sort(sorted, function(a, b) if a.count == b.count then return a.name < b.name end return a.count > b.count end)
+    if #sorted == 0 then
+        invText = "(no eggs in inventory)"
+        return
+    end
+    local lines = {}
+    for _, item in ipairs(sorted) do lines[#lines + 1] = item.name .. "  x  " .. item.count end
+    invText = "Total: " .. total .. "\n" .. table.concat(lines, "\n")
+end
+pcall(refreshInv)
+HomeTab:CreateButton({ Title = "Show Inventory", Callback = function() pcall(refreshInv) info(invText) end })
+task.spawn(function()
+    while not K do
+        task.wait(3); if K then break end
+        pcall(refreshInv)
+    end
+end)
+
+-- ===== FARM =====
+FarmTab:CreateSection("Egg System")
+FarmTab:CreateToggle({
+    Title = "System Enabled", Default = SYS, Flag = SYS_FLAG,
+    Callback = function(v)
+        SYS = v
+        if v and AG then
+            AG = false; AGSavedSYS = nil; AG_TARGET = nil
+            if LunoLib.Elements[AG_FLAG] then LunoLib.Elements[AG_FLAG].Set(false) end
+            warn("Auto Give disabled")
+        end
+        saveAll()
+        if v then ok("System ON") else warn("System OFF") end
+    end
+})
+FarmTab:CreateToggle({
+    Title = "Auto Lava Mutation", Default = LM, Flag = "MacHx_AutoLM",
+    Callback = function(v) LM = v; saveAll(); if v then ok("Auto LM ON") else warn("Auto LM OFF") end end
+})
+
+FarmTab:CreateSection("Priority Eggs (1 = volcanic → lowest)")
+local function PLHas(name) local n = normKey(name) if n == "" then return false end for _, k in ipairs(PL) do if normKey(k) == n then return true end end return false end
+local function PLRemove(name) local n = normKey(name) for i = #PL, 1, -1 do if normKey(PL[i]) == n then table.remove(PL, i) end end end
+local function PLAdd(name) local n = normKey(name) if n == "" then return false, 0 end if PLHas(n) then return false, table.find(PL, n) or 0 end table.insert(PL, n) PL = resortList(PL) return true, table.find(PL, n) end
+
+local priorityText = "(none set)"
+local function refreshPriorityDisplay()
+    if #PL == 0 then priorityText = "(none set)" return end
+    local lines = {}
+    for i, k in ipairs(PL) do
+        local tag = (i == 1) and "  <- highest" or ((i == #PL and #PL > 1) and "  <- lowest" or "")
+        lines[#lines + 1] = i .. ". " .. k .. tag
+    end
+    priorityText = table.concat(lines, "\n")
+end
+
+local eggToggleFlags = {}
+local function syncChecklist()
+    for _, k in ipairs(ALL_EGGS) do
+        local flag = eggToggleFlags[k]
+        if flag and LunoLib.Elements[flag] then
+            pcall(function() LunoLib.Elements[flag].Set(PLHas(normKey(k))) end)
+        end
+    end
+end
+
+for _, k in ipairs(ALL_EGGS) do
+    local baseKey = normKey(k)
+    local flag = "MacHx_Prio_" .. baseKey
+    eggToggleFlags[k] = flag
+    FarmTab:CreateToggle({
+        Title = k, Default = PLHas(baseKey), Flag = flag,
+        Callback = function(v)
+            PLRemove(baseKey)
+            if v then table.insert(PL, baseKey) end
+            PL = resortList(PL)
+            saveAll()
+            refreshPriorityDisplay()
+        end
+    })
+end
+pcall(refreshPriorityDisplay)
+FarmTab:CreateButton({ Title = "Show Priority Order", Callback = function() refreshPriorityDisplay() info(priorityText) end })
+
+FarmTab:CreateInput({
+    Title = "Add Custom Priority", Placeholder = "e.g. rainbow",
+    Callback = function(t)
+        local n = normKey(t) if n == "" then return end
+        local added, pos = PLAdd(n)
+        if added then saveAll(); refreshPriorityDisplay(); syncChecklist(); ok(string.format("Added at slot %d: %s", pos, n))
+        else warn("Already at slot " .. pos .. ": " .. n) end
+    end
+})
+FarmTab:CreateInput({
+    Title = "Remove Priority", Placeholder = "type name",
+    Callback = function(t)
+        local n = normKey(t) if n == "" then return end
+        if PLHas(n) then PLRemove(n); PL = resortList(PL); saveAll(); refreshPriorityDisplay(); syncChecklist(); ok("Removed: " .. n)
+        else warn("Not in priority: " .. n) end
+    end
+})
+FarmTab:CreateButton({ Title = "Clear All Priorities", Callback = function() PL = {} saveAll() refreshPriorityDisplay() syncChecklist() warn("Cleared") end })
+FarmTab:CreateButton({
+    Title = "Restore Defaults (volcanic>cherub>solaris>blackhole)",
+    Callback = function() PL = {"volcanic","cherub","solaris","blackhole"} PL = resortList(PL) saveAll() refreshPriorityDisplay(); syncChecklist(); ok("Defaults restored") end
+})
+
+FarmTab:CreateSection("Farm Speed")
+FarmTab:CreateSlider({ Title = "Tween Speed", Min = 20, Max = 300, Default = SP, Flag = "MacHx_TweenSpeed", Callback = function(v) SP = v; saveAll() end })
+FarmTab:CreateSlider({ Title = "Next Egg Wait", Min = 1, Max = 60, Default = WN, Flag = "MacHx_NextWait", Callback = function(v) WN = v; saveAll() end })
+FarmTab:CreateSlider({ Title = "Top Wait", Min = 1, Max = 60, Default = WT, Flag = "MacHx_TopWait", Callback = function(v) WT = v; saveAll() end })
+FarmTab:CreateSlider({ Title = "Volcano Radius", Min = 3, Max = 50, Default = VR, Flag = "MacHx_VolcanoRadius", Callback = function(v) VR = v; saveAll() end })
+
+FarmTab:CreateSection("Proximity")
+FarmTab:CreateSlider({
+    Title = "Proximity Radius", Min = 5, Max = 100, Default = PR, Flag = "MacHx_ProxRadius",
+    Callback = function(v) PR = v; saveAll(); info("Proximity radius: " .. v) end
+})
+
+-- ===== FARM → AUTO GIVE =====
+FarmTab:CreateSection("Auto Give")
+
+local function getOtherPlayerNames()
+    local names = {}
+    for _, p in ipairs(Players:GetPlayers()) do if p ~= pl then names[#names + 1] = p.Name end end
+    table.sort(names)
+    if #names == 0 then names = {"No Players"} end
+    return names
+end
+local function getFirstTargetName()
+    if type(AG_TARGETS) == "string" then return AG_TARGETS end
+    if type(AG_TARGETS) == "table" then return AG_TARGETS[1] end
+    return nil
+end
+
+local AGStatusText = "Idle"
+local function updateAGStatus()
+    if AG then
+        AGStatusText = "Giving to: " .. (AG_TARGET and AG_TARGET.Name or "?") .. "\nEggs: " .. table.concat(AG_EGGS, ", ")
+    else
+        AGStatusText = "Target: " .. (getFirstTargetName() or "none")
+    end
+end
+
+local agDropdown
+agDropdown = FarmTab:CreateDropdown({
+    Title = "Target Player",
+    Options = getOtherPlayerNames(),
+    Multi = false,
+    Default = getFirstTargetName(),
+    Flag = "MacHx_TargetPlayer",
+    Callback = function(selected)
+        if type(selected) == "string" and selected ~= "" and selected ~= "No Players" then
+            AG_TARGETS = {selected}
+        else
+            AG_TARGETS = {}
+        end
+        AG_TARGET_IDX = 1
+        if AG then
+            local n = getFirstTargetName()
+            AG_TARGET = n and findPlayerByNameG(n) or nil
+            if AG_TARGET then info("Target set: " .. AG_TARGET.Name) else warn("Target not found: " .. tostring(n)) end
+        else
+            AG_TARGET = nil
+        end
+        updateAGStatus()
+    end
+})
+
+local function refreshPlayerDropdown()
+    if agDropdown and agDropdown.Refresh then
+        pcall(function() agDropdown.Refresh(getOtherPlayerNames()) end)
+    end
+end
+C(Players.PlayerAdded:Connect(function() task.wait(0.5) refreshPlayerDropdown() end))
+C(Players.PlayerRemoving:Connect(function(p)
+    task.wait(0.2)
+    refreshPlayerDropdown()
+    if type(AG_TARGETS) == "table" then
+        for i = #AG_TARGETS, 1, -1 do if AG_TARGETS[i] == p.Name then table.remove(AG_TARGETS, i) end end
+    end
+    if AG and AG_TARGET == p then
+        local n = getFirstTargetName()
+        if n then
+            AG_TARGET_IDX = 1
+            AG_TARGET = findPlayerByNameG(n)
+        else
+            AG = false; AG_TARGET = nil
+            if AGSavedSYS ~= nil then SYS = AGSavedSYS end
+            AGSavedSYS = nil
+            if LunoLib.Elements[AG_FLAG] then pcall(function() LunoLib.Elements[AG_FLAG].Set(false) end) end
+            if LunoLib.Elements[SYS_FLAG] then pcall(function() LunoLib.Elements[SYS_FLAG].Set(SYS) end) end
+            warn("Target left - Auto Give disabled")
+        end
+        updateAGStatus()
+    end
+end))
+
+FarmTab:CreateToggle({
+    Title = "Auto Give Enabled", Default = false, Flag = AG_FLAG,
+    Callback = function(v)
+        local name = getFirstTargetName()
+        if v and not name then
+            warn("Select a target player first")
+            task.defer(function() if LunoLib.Elements[AG_FLAG] then pcall(function() LunoLib.Elements[AG_FLAG].Set(false) end) end end)
+            return
+        end
+        if v then
+            local target = findPlayerByNameG(name)
+            if not target then
+                warn("Target player not online: " .. tostring(name))
+                task.defer(function() if LunoLib.Elements[AG_FLAG] then pcall(function() LunoLib.Elements[AG_FLAG].Set(false) end) end end)
+                return
+            end
+            AGSavedSYS = SYS
+            SYS = false
+            if LunoLib.Elements[SYS_FLAG] then pcall(function() LunoLib.Elements[SYS_FLAG].Set(false) end) end
+            AG_TARGET_IDX = 1
+            AG_TARGET = target
+            AG = true
+            ok("Auto Give ON - target: " .. target.Name)
+        else
+            AG = false
+            AG_TARGET = nil
+            if AGSavedSYS ~= nil then SYS = AGSavedSYS end
+            AGSavedSYS = nil
+            if LunoLib.Elements[SYS_FLAG] then pcall(function() LunoLib.Elements[SYS_FLAG].Set(SYS) end) end
+            warn("Auto Give OFF")
+        end
+        saveAll()
+        updateAGStatus()
+    end
+})
+FarmTab:CreateButton({ Title = "Show Auto Give Status", Callback = function() updateAGStatus() info(AGStatusText) end })
+
+FarmTab:CreateSection("Eggs to Give (multi-select)")
+
+local function AGEHas(name)
+    local n = normKey(name)
+    if n == "" then return false end
+    for _, k in ipairs(AG_EGGS) do if normKey(k) == n then return true end end
+    return false
+end
+local ageText = "(none set)"
+local function refreshAGEDisplay()
+    if #AG_EGGS == 0 then ageText = "(none set)" return end
+    local lines = {}
+    for i, k in ipairs(AG_EGGS) do
+        local tag = (i == 1) and "  <- highest" or ((i == #AG_EGGS and #AG_EGGS > 1) and "  <- lowest" or "")
+        lines[#lines + 1] = i .. ". " .. k .. tag
+    end
+    ageText = table.concat(lines, "\n")
+end
+pcall(refreshAGEDisplay)
+
+local function getAllEggNamesAG()
+    local names = {}
+    for _, k in ipairs(ALL_EGGS) do names[#names + 1] = k end
+    for _, k in ipairs(AG_EGGS) do
+        local found = false
+        for _, n in ipairs(names) do if normKey(n) == normKey(k) then found = true break end end
+        if not found then names[#names + 1] = k end
+    end
+    table.sort(names)
+    return names
+end
+local function currentAGSelection()
+    local sel = {}
+    for _, n in ipairs(ALL_EGGS) do if AGEHas(n) then sel[#sel + 1] = n end end
+    for _, k in ipairs(AG_EGGS) do
+        local found = false
+        for _, n in ipairs(ALL_EGGS) do if normKey(n) == normKey(k) then found = true break end end
+        if not found then sel[#sel + 1] = k end
+    end
+    return sel
+end
+
+local ageDropdown
+ageDropdown = FarmTab:CreateDropdown({
+    Title = "Select Eggs (multi)",
+    Options = getAllEggNamesAG(),
+    Multi = true,
+    Default = currentAGSelection(),
+    Flag = "MacHx_GiveEggs",
+    Callback = function(selected)
+        local newList = {}
+        if type(selected) == "table" then
+            for _, n in ipairs(selected) do newList[#newList + 1] = normKey(n) end
+        elseif type(selected) == "string" and selected ~= "" then
+            newList = {normKey(selected)}
+        end
+        AG_EGGS = resortList(newList)
+        saveAll()
+        refreshAGEDisplay()
+        ok(string.format("Give list updated (%d eggs)", #AG_EGGS))
+    end
+})
+FarmTab:CreateButton({ Title = "Show Give List", Callback = function() refreshAGEDisplay() info(ageText) end })
+FarmTab:CreateButton({
+    Title = "Refresh Dropdown List",
+    Callback = function()
+        if ageDropdown and ageDropdown.Refresh then pcall(function() ageDropdown.Refresh(getAllEggNamesAG()) end) end
+        ok("Refreshed")
+    end
+})
+FarmTab:CreateInput({
+    Title = "Add Custom Egg (partial match)", Placeholder = "e.g. rainbow",
+    Callback = function(t)
+        local n = normKey(t) if n == "" then return end
+        if AGEHas(n) then warn("Already added: " .. n); return end
+        table.insert(AG_EGGS, n)
+        AG_EGGS = resortList(AG_EGGS)
+        saveAll()
+        refreshAGEDisplay()
+        if ageDropdown and ageDropdown.Refresh then pcall(function() ageDropdown.Refresh(getAllEggNamesAG()) end) end
+        ok("Added: " .. n)
+    end
+})
+FarmTab:CreateButton({
+    Title = "Clear Give List",
+    Callback = function()
+        AG_EGGS = {}
+        saveAll()
+        refreshAGEDisplay()
+        if ageDropdown and ageDropdown.Refresh then pcall(function() ageDropdown.Refresh(getAllEggNamesAG()) end) end
+        warn("Cleared")
+    end
+})
+FarmTab:CreateButton({
+    Title = "Restore Defaults (volcanic>cherub>solaris>blackhole)",
+    Callback = function()
+        AG_EGGS = {"volcanic","cherub","solaris","blackhole"}
+        AG_EGGS = resortList(AG_EGGS)
+        saveAll()
+        refreshAGEDisplay()
+        if ageDropdown and ageDropdown.Refresh then pcall(function() ageDropdown.Refresh(getAllEggNamesAG()) end) end
+        ok("Defaults restored")
+    end
+})
+FarmTab:CreateButton({ Title = "Refresh Players List", Callback = function() refreshPlayerDropdown() ok("Refreshed") end })
+
+updateAGStatus()
+
+-- ===== ESP =====
+ESPTab:CreateSection("ESP")
+ESPTab:CreateToggle({
+    Title = "ESP Enabled", Default = EE, Flag = "MacHx_ESPEnabled",
+    Callback = function(v) EE = v if v then CA() else DA() end saveAll() if v then ok("ESP ON") else warn("ESP OFF") end end
+})
+
+ESPTab:CreateSection("Auto ESP Eggs")
+for _, k in ipairs({"cherub egg","blackhole egg","galaxy egg","volcanic egg","solaris egg"}) do
+    local nk = normKey(k)
+    ESPTab:CreateToggle({
+        Title = k:upper(), Default = AE[nk] ~= false, Flag = "MacHx_AutoESP_" .. nk,
+        Callback = function(v) AE[nk] = v saveAll() if v then CA() else ReEvalESP() end end
+    })
+end
+
+ESPTab:CreateSection("Manual ESP")
+local manualText = "(empty)"
+local function refreshManualDisplay()
+    local list = {}
+    for k in pairs(SE) do list[#list + 1] = k end
+    table.sort(list)
+    manualText = (#list == 0) and "(empty)" or table.concat(list, "\n")
+end
+pcall(refreshManualDisplay)
+
+local function getAllEggNames()
+    local names = {}
+    for _, k in ipairs(ALL_EGGS) do names[#names + 1] = k end
+    for k in pairs(SE) do
+        local found = false
+        for _, n in ipairs(names) do if normKey(n) == normKey(k) then found = true break end end
+        if not found then names[#names + 1] = k end
+    end
+    table.sort(names)
+    return names
+end
+local function currentSelection()
+    local sel = {}
+    for _, n in ipairs(ALL_EGGS) do if SE[normKey(n)] then sel[#sel + 1] = n end end
+    for k in pairs(SE) do
+        local found = false
+        for _, n in ipairs(ALL_EGGS) do if normKey(n) == normKey(k) then found = true break end end
+        if not found then sel[#sel + 1] = k end
+    end
+    return sel
+end
+
+local manualDropdown = ESPTab:CreateDropdown({
+    Title = "Select Eggs (multi)", Options = getAllEggNames(), Multi = true, Default = currentSelection(), Flag = "MacHx_ManualESP",
+    Callback = function(selected)
+        local newSE = {}
+        if type(selected) == "table" then for _, n in ipairs(selected) do newSE[normKey(n)] = true end
+        elseif type(selected) == "string" and selected ~= "" then newSE[normKey(selected)] = true end
+        SE = newSE
+        saveAll(); refreshManualDisplay(); ReEvalESP(); CA()
+        local n = 0 for _ in pairs(SE) do n = n + 1 end
+        ok(string.format("Manual ESP updated (%d)", n))
+    end
+})
+ESPTab:CreateButton({ Title = "Show Manual List", Callback = function() refreshManualDisplay() info(manualText) end })
+ESPTab:CreateButton({
+    Title = "Refresh Dropdown List",
+    Callback = function()
+        if manualDropdown and manualDropdown.Refresh then pcall(function() manualDropdown.Refresh(getAllEggNames()) end) end
+        ok("Refreshed")
+    end
+})
+ESPTab:CreateInput({
+    Title = "Add Custom Egg (partial)", Placeholder = "e.g. rainbow",
+    Callback = function(t)
+        if not t or t == "" then return end
+        local key = normKey(t) if key == "" then return end
+        if SE[key] then warn("Already added: " .. key); return end
+        SE[key] = true
+        saveAll(); refreshManualDisplay()
+        if manualDropdown and manualDropdown.Refresh then pcall(function() manualDropdown.Refresh(getAllEggNames()) end) end
+        CA()
+        ok("Added: " .. key)
+    end
+})
+ESPTab:CreateButton({
+    Title = "Clear Manual Eggs",
+    Callback = function()
+        for k in pairs(SE) do SE[k] = nil end
+        saveAll(); ReEvalESP(); refreshManualDisplay()
+        if manualDropdown and manualDropdown.Refresh then pcall(function() manualDropdown.Refresh(getAllEggNames()) end) end
+        warn("Cleared")
+    end
+})
+
+-- ===== PRESETS / EVENTS (Coming Soon) =====
+PresetsTab:CreateSection("Presets")
+PresetsTab:CreateButton({ Title = "Coming Soon", Callback = function() info("Save/load setup - coming soon") end })
+
+EventsTab:CreateSection("Events")
+EventsTab:CreateButton({ Title = "Coming Soon", Callback = function() info("Auto-join events - coming soon") end })
+
+-- ===== SETTINGS =====
+SettingsTab:CreateSection("Notifications")
+SettingsTab:CreateToggle({
+    Title = "Hide All Notifications", Default = HIDE_NOTIF, Flag = "MacHx_HideNotif",
+    Callback = function(v) HIDE_NOTIF = v saveAll() if not v then ok("Notifications ON") end end
+})
+SettingsTab:CreateButton({
+    Title = "Test Notifications",
+    Callback = function() info("Info") task.wait(0.3) ok("Success") task.wait(0.3) warn("Warning") task.wait(0.3) err("Error") end
+})
+
+SettingsTab:CreateSection("Input")
+SettingsTab:CreateButton({
+    Title = "Show Toggle Key Info",
+    Callback = function() sys("UI Toggle Key: RightControl / Insert (fixed by library)") end
+})
+
+SettingsTab:CreateSection("Save File")
+SettingsTab:CreateButton({ Title = "Save Now (File: " .. SAVE .. ")", Callback = function() saveAll() ok("Saved") end })
+SettingsTab:CreateButton({
+    Title = "Reset All Settings",
+    Callback = function()
+        SYS = true; LM = true; EE = true
+        SP = 80; WN = 15; WT = 13; VR = 10; PR = 30
+        AE = {["cherub"]=true,["blackhole"]=true,["galaxy"]=true,["volcanic"]=true,["solaris"]=true}
+        SE = {}; PL = {"volcanic","cherub","solaris","blackhole"}
+        AG_EGGS = {"volcanic","cherub","solaris","blackhole"}
+        noclipEnabled = false; infJumpEnabled = false
+        ANTI_AFK = true; HIDE_NOTIF = false
+        saveAll()
+        pcall(function() refreshPriorityDisplay(); syncChecklist() end)
+        pcall(function() refreshManualDisplay() end)
+        pcall(function() refreshAGEDisplay() end)
+        pcall(function() DA(); CA() end)
+        warn("Settings reset")
+    end
+})
+
+SettingsTab:CreateSection("Danger Zone")
+SettingsTab:CreateButton({
+    Title = "Destroy MacHx",
+    Callback = function()
+        if K then return end
+        K = true; SYS = false; LM = false; EE = false; AG = false; AG_TARGET = nil
+        for _, c in ipairs(CN) do pcall(function() c:Disconnect() end) end
+        CN = {}
+        for e in pairs(EO) do pcall(function() RE(e) end) end
+        EO = {}
+        pcall(function() for _, egg in ipairs(EF:GetDescendants()) do if egg.Name == "EggESP" then pcall(function() egg:Destroy() end) end end end)
+        pcall(function() NotifGui:Destroy() end)
+        if getgenv().LunoUI_Cleanup then pcall(getgenv().LunoUI_Cleanup) end
+    end
+})
+SettingsTab:CreateButton({
+    Title = "Unload UI Only",
+    Callback = function() if getgenv().LunoUI_Cleanup then pcall(getgenv().LunoUI_Cleanup) end end
+})
+
+sys("MacHx loaded (Luno UI) - Toggle key: RightControl / Insert")
