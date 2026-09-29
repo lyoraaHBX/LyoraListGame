@@ -70,24 +70,36 @@ do
     local JOB_HASH = "ca01587a32b24eb1a0527e8e595e8483"
 
     -- Konstanta (gampang diubah untuk debug)
-    local HEIST_RETRY_DELAY     = 3   -- delay retry kalau start gagal
-    local HEIST_COLLECT_INTERVAL = 10 -- interval polling collect
-    local HEIST_DELAY_BETWEEN   = 2   -- delay antar siklus heist
-    local MAX_HEIST_SLOT        = 4   -- range random slot/crew (1 s/d N), sesuaikan kalau perlu
+    local HEIST_RETRY_DELAY      = 3   -- delay retry kalau start gagal
+    local HEIST_COLLECT_INTERVAL = 10  -- interval polling collect
+    local HEIST_DELAY_BETWEEN    = 2   -- delay antar siklus heist
+    local MAX_HEIST_SLOT         = 4   -- range random slot/crew (1 s/d N), sesuaikan kalau perlu
 
-    -- List heist: id saja, tinggal tambah/edit manual di sini
-    -- NOTE: nanti bisa diganti/ditambah data lain per heist (level requirement, dsb) kalau sudah dimodularkan
+    -- List heist: HANYA id (modular, gampang tambah/kurang)
     local HEIST_LIST = {
         { id = "heist_cornerstore" },
-        -- { id = "heist_jewelrystore" },
-        -- { id = "heist_bank" },
+        { id = "heist_truck" },
+        { id = "heist_museum" },
+        { id = "heist_vault" },
+        { id = "heist_bullion" },
+        { id = "heist_firstoath" },
+        { id = "heist_cistern" },
     }
+
+    -- Dropdown pakai id langsung sebagai display text (tidak perlu mapping nama)
+    local HeistIdList = {}
+    for _, heistData in ipairs(HEIST_LIST) do
+        table.insert(HeistIdList, heistData.id)
+    end
+
+    -- Set heist id yang dipilih user via dropdown (bisa lebih dari 1)
+    local SelectedHeistIds = {} -- { [id] = true }
 
     local HeistTab = LunoLibrary:CreateTab("Heist")
 
     local MWRemotes, HeistActionEvent
     pcall(function()
-        MWRemotes       = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes")
+        MWRemotes        = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes")
         HeistActionEvent = MWRemotes:WaitForChild("HeistAction")
     end)
 
@@ -102,7 +114,6 @@ do
         return false, nil
     end
 
-    -- Deteksi heist berhasil di-start (jangan spam start lagi kalau sudah muncul ini)
     local function IsHeistOnBoard(result)
         if result and result.ok == true and result.msg then
             return tostring(result.msg):lower():find("on the board") ~= nil
@@ -110,7 +121,6 @@ do
         return false
     end
 
-    -- Deteksi limit harian tercapai (stop semua sistem + visual UI)
     local function IsHeistLimitReached(result)
         if result and result.ok == false and result.msg then
             return tostring(result.msg):lower():find("already started") ~= nil
@@ -118,9 +128,19 @@ do
         return false
     end
 
-    -- Deteksi collect berhasil
     local function IsHeistCollected(result)
         return result ~= nil and result.ok == true and result.collected == true
+    end
+
+    -- Ambil daftar id heist yang sedang dipilih (array, urutan sesuai HEIST_LIST)
+    local function GetSelectedHeistList()
+        local list = {}
+        for _, heistData in ipairs(HEIST_LIST) do
+            if SelectedHeistIds[heistData.id] then
+                table.insert(list, heistData)
+            end
+        end
+        return list
     end
 
     ----------------------------------------------------------------
@@ -128,15 +148,27 @@ do
     ----------------------------------------------------------------
     local AutoHeistEnabled  = false
     local HeistLimitReached = false
-    local AutoHeistToggleRef = nil
+    local AUTO_HEIST_FLAG   = "AutoHeistEnabled"
+
+    -- FIX: CreateToggle di library ini TIDAK mengembalikan reference apapun (no return statement),
+    -- jadi satu-satunya cara valid untuk mengontrol toggle secara programatic adalah lewat
+    -- LunoLibrary.Elements[Flag].Set(value) -- yang di-set internal di dalam CreateToggle.
+    local function ForceToggleOff()
+        local toggleElement = LunoLibrary.Elements[AUTO_HEIST_FLAG]
+        if toggleElement and toggleElement.Set then
+            pcall(function() toggleElement.Set(false) end)
+        end
+    end
 
     local function StopAutoHeist(reason)
         AutoHeistEnabled  = false
         HeistLimitReached = true
-        print("[AUTO HEIST] DIHENTIKAN PERMANEN (limit harian): " .. tostring(reason))
-        if AutoHeistToggleRef then
-            pcall(function() AutoHeistToggleRef:Set(false) end)
-        end
+        ForceToggleOff()
+        LunoLibrary:Notify({
+            Title = "Auto Heist",
+            Content = "Limit harian tercapai: " .. tostring(reason),
+            Duration = 5
+        })
     end
 
     ----------------------------------------------------------------
@@ -148,19 +180,27 @@ do
         while AutoHeistEnabled do
             if HeistLimitReached then
                 AutoHeistEnabled = false
+                ForceToggleOff()
                 break
             end
 
-            if #HEIST_LIST == 0 then
-                print("[AUTO HEIST] HEIST_LIST kosong, tidak ada heist untuk dijalankan.")
+            local selectedList = GetSelectedHeistList()
+
+            if #selectedList == 0 then
+                LunoLibrary:Notify({
+                    Title = "Auto Heist",
+                    Content = "Belum ada heist yang dipilih di dropdown!",
+                    Duration = 4
+                })
                 AutoHeistEnabled = false
+                ForceToggleOff()
                 break
             end
 
-            if heistIndex > #HEIST_LIST then
+            if heistIndex > #selectedList then
                 heistIndex = 1
             end
-            local heistData = HEIST_LIST[heistIndex]
+            local heistData = selectedList[heistIndex]
 
             ----------------------------------------------------------------
             -- 1. START PHASE (retry sampai berhasil "on the board" / limit / stop)
@@ -172,17 +212,18 @@ do
 
                 if invokeOk and result then
                     if IsHeistOnBoard(result) then
-                        print("[AUTO HEIST] Started: " .. heistData.id .. " (slot " .. randomSlot .. ") | " .. tostring(result.msg))
+                        LunoLibrary:Notify({
+                            Title = "Auto Heist",
+                            Content = "Heist dimulai: " .. heistData.id,
+                            Duration = 3
+                        })
                         started = true
                     elseif IsHeistLimitReached(result) then
                         StopAutoHeist(result.msg)
                         return
                     elseif result.ok == false then
-                        print("[AUTO HEIST] Start gagal (" .. heistData.id .. "): " .. tostring(result.msg))
                         task.wait(HEIST_RETRY_DELAY)
                     else
-                        -- ok=true tapi msg tidak mengandung "on the board" -> anggap tetap started
-                        print("[AUTO HEIST] Started (unexpected msg): " .. tostring(result.msg))
                         started = true
                     end
                 else
@@ -209,10 +250,12 @@ do
                         StopAutoHeist(result.msg)
                         return
                     elseif IsHeistCollected(result) then
-                        print("[AUTO HEIST] Collected! XP: " .. tostring(result.xp) .. " | Cash: " .. tostring(result.cash))
+                        LunoLibrary:Notify({
+                            Title = "Auto Heist",
+                            Content = heistData.id .. " Collected! XP: " .. tostring(result.xp) .. " | Cash: " .. tostring(result.cash),
+                            Duration = 4
+                        })
                         collected = true
-                    elseif result.ok == false then
-                        print("[AUTO HEIST] Collect belum siap (" .. heistData.id .. "): " .. tostring(result.msg))
                     end
                 end
 
@@ -231,17 +274,35 @@ do
     ----------------------------------------------------------------
     HeistTab:CreateSection("Auto Heist")
 
-    AutoHeistToggleRef = HeistTab:CreateToggle({
+    HeistTab:CreateDropdown({
+        Title = "Pilih Heist (Multi-Select)",
+        Options = HeistIdList,
+        Multi = true,
+        Default = {},
+        Flag = "SelectedHeistIds",
+        Callback = function(SelectedNames)
+            SelectedHeistIds = {}
+            if type(SelectedNames) == "table" then
+                for _, heistId in ipairs(SelectedNames) do
+                    SelectedHeistIds[heistId] = true
+                end
+            end
+        end
+    })
+
+    HeistTab:CreateToggle({
         Title = "Auto Heist (Start & Collect Otomatis)",
         Default = false,
-        Flag = "AutoHeistEnabled",
+        Flag = AUTO_HEIST_FLAG,
         Callback = function(State)
             if State and HeistLimitReached then
-                print("[AUTO HEIST] Limit harian sudah tercapai, tidak bisa dinyalakan lagi hari ini.")
+                LunoLibrary:Notify({
+                    Title = "Auto Heist",
+                    Content = "Limit harian sudah tercapai, tidak bisa dinyalakan lagi hari ini.",
+                    Duration = 4
+                })
                 AutoHeistEnabled = false
-                if AutoHeistToggleRef then
-                    pcall(function() AutoHeistToggleRef:Set(false) end)
-                end
+                ForceToggleOff()
                 return
             end
 
