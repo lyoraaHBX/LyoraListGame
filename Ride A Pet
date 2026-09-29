@@ -1,1082 +1,3135 @@
-local LunoLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"))()
+--// Rossi.Draft - Ride A Pet  (versi LUNO UI)
+--// UI: LUNO UI Library (Lyora X)
 
-local Players, RS, UIS = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
-local TS, R, HS, VU = game:GetService("TweenService"), game:GetService("ReplicatedStorage"), game:GetService("HttpService"), game:GetService("VirtualUser")
-local pl, pg = Players.LocalPlayer, Players.LocalPlayer:WaitForChild("PlayerGui")
-local EF = workspace:WaitForChild("RenderedEggs")
-local K, CN = false, {}
-AG_TARGET = nil
-AG_TARGETS = {}
-AG_TARGET_IDX = 1
-AG_EGGS = nil
+local LIB_URL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
+local DISCORD_LINK = "https://discord.gg/AwGHNh7Z7T"
+-- Isi dengan raw link script ini kalau mau fitur "Auto Load Script" (queue_on_teleport) aktif.
+local SCRIPT_URL = ""
 
-local function C(c) CN[#CN+1] = c; return c end
-local SAVE = "MacHx_Save.json"
-local function saveD(t) if writefile then pcall(writefile, SAVE, HS:JSONEncode(t)) end end
-local function loadD()
-    if readfile and isfile then
-        local o, r = pcall(function() if isfile(SAVE) then return readfile(SAVE) end end)
-        if o and r then local o2, d = pcall(HS.JSONDecode, HS, r) if o2 and type(d) == "table" then return d end end
-    end
-    return {}
-end
-local SV = loadD()
-local ALL_EGGS = {"White Egg","Brown Egg","Cracked Egg","Easter Egg","Stone Egg","Leaf Egg","Mushroom Egg","Flower Egg","Slime Egg","Ice Egg","Glass Egg","Golden Egg","Diamond Egg","Crystal Egg","Skull Egg","Asteroid Egg","Dominus Egg","Flaming Egg","Sinister Egg","Soul Egg","Tidal Egg","Aurora Egg","Galaxy Egg","Bloom Egg","Blackhole Egg","Solaris Egg","Cherub Egg","Volcanic Egg"}
-local SYS = SV.SYS ~= false
-local LM = SV.LM ~= false
-local EE = SV.EE ~= false
-local SP = SV.SP or 80
-local WN = SV.WN or 15
-local WT = SV.WT or 13
-local VR = SV.VR or 30
-local PR = SV.PR or 30
-local AE = SV.AE or {["cherub egg"]=true,["blackhole egg"]=true,["galaxy egg"]=true,["volcanic egg"]=true,["solaris egg"]=true}
-local SE = SV.SE or {}
-local PL = SV.PL or {"volcanic","cherub","solaris","blackhole"}
-AG_EGGS = SV.AG_EGGS or {"volcanic","cherub","solaris","blackhole"}
-local noclipEnabled = SV.noclip or false
-local infJumpEnabled = SV.infJump or false
-local ANTI_AFK = SV.antiAfk ~= false
-local HIDE_NOTIF = SV.hideNotif or false
+---------------------------------------------------------------------
+-- SERVICES
+---------------------------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local Stats = game:GetService("Stats")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 
-function normKey(name)
-    local s = tostring(name or ""):lower()
-    s = s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-    return s:gsub(" egg$", "")
+local localPlayer = Players.LocalPlayer
+
+---------------------------------------------------------------------
+-- CLEANUP
+---------------------------------------------------------------------
+local genv = typeof(getgenv) == "function" and getgenv() or _G
+if type(genv.RossiDraftCleanup) == "function" then
+	pcall(genv.RossiDraftCleanup)
 end
 
-local FIXED_ORDER = {volcanic=1, cherub=2, solaris=3, blackhole=4}
-function resortList(lst)
-    local fixed, others, seen = {}, {}, {}
-    for _, k in ipairs(lst) do
-        local n = normKey(k)
-        if n ~= "" and not seen[n] then
-            seen[n] = true
-            if FIXED_ORDER[n] then fixed[#fixed+1] = {key=n, rank=FIXED_ORDER[n]}
-            else others[#others+1] = n end
-        end
-    end
-    table.sort(fixed, function(a,b) return a.rank < b.rank end)
-    local out = {}
-    for _, item in ipairs(fixed) do out[#out+1] = item.key end
-    for _, n in ipairs(others) do out[#out+1] = n end
-    return out
+local CleanupList = {}
+local function OnCleanup(fn)
+	table.insert(CleanupList, fn)
 end
 
-function findPlayerByNameG(name)
-    if not name then return nil end
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p.Name == name or p.DisplayName == name then return p end
-    end
-    return nil
+genv.RossiDraftCleanup = function()
+	for i = #CleanupList, 1, -1 do
+		pcall(CleanupList[i])
+	end
+	table.clear(CleanupList)
+end
+
+---------------------------------------------------------------------
+-- LOAD LUNO UI
+---------------------------------------------------------------------
+local Luno = loadstring(game:HttpGet(LIB_URL))()
+assert(type(Luno) == "table" and type(Luno.CreateWindow) == "function", "LUNO UI gagal dimuat.")
+
+Luno:CreateWindow({
+	Title = "ROSSI",
+	SubTitle = "Draft | Ride A Pet",
+	Discord = DISCORD_LINK,
+})
+
+-- tombol close di LUNO juga menghentikan semua loop script
+do
+	local libCleanup = genv.LunoUI_Cleanup
+	genv.LunoUI_Cleanup = function()
+		pcall(genv.RossiDraftCleanup)
+		if libCleanup then
+			libCleanup()
+		end
+	end
+end
+
+local FarmTab = Luno:CreateTab("Farm")
+local PlayerTab = Luno:CreateTab("Player")
+local ServerTab = Luno:CreateTab("Server")
+local UtilityTab = Luno:CreateTab("Utility")
+
+local function Notify(title, text)
+	pcall(Luno.Notify, Luno, { Title = title, Content = text, Duration = 4 })
+end
+
+local function On(flag)
+	return Luno.Flags[flag] == true
+end
+
+local function SetFlag(flag, value)
+	local el = Luno.Elements[flag]
+	if el and el.Set then
+		pcall(el.Set, value)
+	end
+end
+
+local function ToSet(list)
+	local set = {}
+	if type(list) == "table" then
+		for k, v in pairs(list) do
+			if v == true and type(k) == "string" then
+				set[k] = true
+			elseif type(v) == "string" then
+				set[v] = true
+			end
+		end
+	end
+	return set
+end
+
+---------------------------------------------------------------------
+-- GAME DATA
+---------------------------------------------------------------------
+local Remotes = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Game")
+local ActiveEggs = ReplicatedStorage:WaitForChild("ServerData"):WaitForChild("ActiveEggs")
+
+local function SafeRequire(getter)
+	local ok, result = pcall(function()
+		return require(getter())
+	end)
+	return ok and result or nil
+end
+
+local Data = {
+	Eggs = SafeRequire(function() return ReplicatedStorage.GameData.Eggs end),
+	Pets = SafeRequire(function() return ReplicatedStorage.GameData.Pets end),
+	Foods = SafeRequire(function() return ReplicatedStorage.GameData.Foods end),
+	Shop = SafeRequire(function() return ReplicatedStorage.GameData.Shop end),
+	Rebirths = SafeRequire(function() return ReplicatedStorage.GameData.Rebirths end),
+	EggBaskets = SafeRequire(function() return ReplicatedStorage.GameData.EggBaskets end),
+	Mutations = SafeRequire(function() return ReplicatedStorage.GameData.Mutations end),
+}
+
+local GuiParent = CoreGui
+if typeof(gethui) == "function" then
+	local ok, result = pcall(gethui)
+	if ok and typeof(result) == "Instance" then
+		GuiParent = result
+	end
+end
+
+local rng = Random.new()
+local CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+local function RandName()
+	local len = rng:NextInteger(12, 20)
+	local out = table.create(len)
+	for i = 1, len do
+		local idx = rng:NextInteger(1, #CHARSET)
+		out[i] = string.sub(CHARSET, idx, idx)
+	end
+	return table.concat(out)
+end
+
+local RarityOrder = { "Common", "Rare", "Epic", "Legendary", "Mythic", "Divine", "Ethereal" }
+local RarityRank = {}
+for i, r in ipairs(RarityOrder) do
+	RarityRank[r] = i
+end
+local RarityChoices = { "Any" }
+for _, r in ipairs(RarityOrder) do
+	table.insert(RarityChoices, r)
+end
+local RarityColors = {
+	Common = Color3.fromRGB(214, 218, 228),
+	Rare = Color3.fromRGB(96, 170, 255),
+	Epic = Color3.fromRGB(190, 110, 255),
+	Legendary = Color3.fromRGB(255, 196, 66),
+	Mythic = Color3.fromRGB(255, 82, 90),
+	Divine = Color3.fromRGB(255, 240, 150),
+	Ethereal = Color3.fromRGB(125, 225, 255),
+}
+
+---------------------------------------------------------------------
+-- UTIL
+---------------------------------------------------------------------
+local Util = {
+	FlySpeed = 600,
+	CruiseHeight = 250,
+	Status = "Idle",
+	Movement = { Owner = nil },
+}
+
+local cachedPlot = nil
+
+function Util.Humanoid()
+	local char = localPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Health > 0 then
+		return hum
+	end
+	return nil
+end
+
+function Util.Root()
+	local char = localPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if root and root:IsDescendantOf(workspace) then
+		return root
+	end
+	return nil
+end
+
+function Util.Plot()
+	if cachedPlot and cachedPlot.Parent then
+		local owner = cachedPlot:FindFirstChild("Data")
+		owner = owner and owner:FindFirstChild("Owner")
+		if owner and owner.Value == localPlayer then
+			return cachedPlot
+		end
+	end
+	cachedPlot = nil
+	local plots = workspace:FindFirstChild("Plots")
+	if not plots then
+		return nil
+	end
+	for _, child in ipairs(plots:GetChildren()) do
+		local owner = child:FindFirstChild("Data")
+		owner = owner and owner:FindFirstChild("Owner")
+		if owner and owner.Value == localPlayer then
+			cachedPlot = child
+			return child
+		end
+	end
+	return nil
+end
+
+function Util.PlotBase()
+	local plot = Util.Plot()
+	local base = plot and plot:FindFirstChild("Baseplate")
+	if base and base:IsA("BasePart") then
+		return base
+	end
+	return nil
+end
+
+function Util.PlotTop()
+	local base = Util.PlotBase()
+	if not base then
+		return nil
+	end
+	return base.Position + Vector3.new(0, base.Size.Y / 2, 0)
+end
+
+function Util.RandomPlotPoint(margin, avoid, minDist)
+	local base = Util.PlotBase()
+	if not base then
+		return nil
+	end
+	local hx = math.max(1, base.Size.X / 2 - margin)
+	local hz = math.max(1, base.Size.Z / 2 - margin)
+	local topY = base.Position.Y + base.Size.Y / 2
+	local fallback = nil
+	for _ = 1, 24 do
+		local localPoint = Vector3.new(rng:NextNumber(-hx, hx), 0, rng:NextNumber(-hz, hz))
+		local w = base.CFrame:PointToWorldSpace(localPoint)
+		local point = Vector3.new(w.X, topY, w.Z)
+		local ok = true
+		if avoid then
+			for _, other in ipairs(avoid) do
+				if Vector3.new(other.X - point.X, 0, other.Z - point.Z).Magnitude < minDist then
+					ok = false
+					break
+				end
+			end
+		end
+		if ok then
+			return point
+		end
+		fallback = fallback or point
+	end
+	return fallback
+end
+
+function Util.Cash()
+	local saved = localPlayer:FindFirstChild("SavedData")
+	local cash = saved and saved:FindFirstChild("Cash")
+	return cash and tonumber(cash.Value) or 0
+end
+
+function Util.Saved(name)
+	local saved = localPlayer:FindFirstChild("SavedData")
+	local v = saved and saved:FindFirstChild(name)
+	return v and v.Value or nil
+end
+
+function Util.Fire(name, ...)
+	local remote = Remotes:FindFirstChild(name)
+	if not remote or not remote:IsA("RemoteEvent") then
+		return false
+	end
+	local args = table.pack(...)
+	return pcall(function()
+		remote:FireServer(table.unpack(args, 1, args.n))
+	end)
+end
+
+function Util.EggData(name)
+	local eggs = Data.Eggs
+	local d = type(eggs) == "table" and eggs[tostring(name)] or nil
+	return type(d) == "table" and d or nil
+end
+
+function Util.EggRank(name)
+	local d = Util.EggData(name)
+	return d and RarityRank[tostring(d.Rarity)] or 0
+end
+
+function Util.EggRarity(name)
+	local d = Util.EggData(name)
+	return d and tostring(d.Rarity) or "Common"
+end
+
+function Util.EggLuck(name)
+	local d = Util.EggData(name)
+	return d and tonumber(d.Luck) or 0
+end
+
+function Util.PetData(name)
+	local pets = Data.Pets
+	local d = type(pets) == "table" and pets[tostring(name)] or nil
+	return type(d) == "table" and d or nil
+end
+
+function Util.MutationBonus(mutation)
+	local muts = Data.Mutations
+	local d = type(muts) == "table" and mutation and muts[tostring(mutation)] or nil
+	return 1 + (type(d) == "table" and tonumber(d.StatMultiplier) or 0) / 100
+end
+
+function Util.PetScore(name, weight, mutation)
+	local d = Util.PetData(name)
+	return (d and tonumber(d.Income) or 1) * math.max(tonumber(weight) or 1, 0.1) * Util.MutationBonus(mutation)
+end
+
+function Util.PetNameOf(inst)
+	local attr = inst:GetAttribute("PetName")
+	if type(attr) == "string" and attr ~= "" then
+		return attr
+	end
+	return (string.gsub(inst.Name, "%s*%[.*$", ""))
+end
+
+function Util.Tools(tag)
+	local list = {}
+	local backpack = localPlayer:FindFirstChildOfClass("Backpack")
+	if backpack then
+		for _, child in ipairs(backpack:GetChildren()) do
+			if child:IsA("Tool") and CollectionService:HasTag(child, tag) then
+				table.insert(list, child)
+			end
+		end
+	end
+	local char = localPlayer.Character
+	if char then
+		for _, child in ipairs(char:GetChildren()) do
+			if child:IsA("Tool") and CollectionService:HasTag(child, tag) then
+				table.insert(list, child)
+			end
+		end
+	end
+	return list
+end
+
+function Util.Equip(tool)
+	local hum = Util.Humanoid()
+	local char = localPlayer.Character
+	if not hum or not tool or not char then
+		return false
+	end
+	if tool.Parent == char then
+		return true
+	end
+	pcall(function()
+		hum:EquipTool(tool)
+	end)
+	local untilT = os.clock() + 1
+	while tool.Parent ~= char and os.clock() < untilT do
+		RunService.Heartbeat:Wait()
+	end
+	return tool.Parent == char
+end
+
+function Util.Unequip()
+	local hum = Util.Humanoid()
+	if hum then
+		pcall(function()
+			hum:UnequipTools()
+		end)
+	end
+end
+
+function Util.BasketCount()
+	local basket = localPlayer:FindFirstChild("Basket")
+	return basket and #basket:GetChildren() or 0
+end
+
+function Util.BasketCapacity()
+	local equipped = Util.Saved("EquippedEggBasket")
+	local baskets = Data.EggBaskets
+	local d = type(baskets) == "table" and equipped and baskets[tostring(equipped)] or nil
+	local cap = type(d) == "table" and tonumber(d.Capacity) or 1
+	if cap == math.huge or cap > 50 then
+		return 50
+	end
+	return math.max(1, cap)
+end
+
+function Util.BasketDeadline()
+	local basket = localPlayer:FindFirstChild("Basket")
+	local best = nil
+	if basket then
+		for _, child in ipairs(basket:GetChildren()) do
+			local t = tonumber(child:GetAttribute("BreakAt"))
+			if t and (best == nil or t < best) then
+				best = t
+			end
+		end
+	end
+	return best
+end
+
+-- Noclip + terbang (tween CFrame)
+local noclipSaved = {}
+
+function Util.SetNoclip(state)
+	local char = localPlayer.Character
+	if not char then
+		return
+	end
+	for _, d in ipairs(char:GetDescendants()) do
+		if d:IsA("BasePart") then
+			if state then
+				if noclipSaved[d] == nil then
+					noclipSaved[d] = d.CanCollide
+				end
+				d.CanCollide = false
+			elseif noclipSaved[d] ~= nil then
+				d.CanCollide = noclipSaved[d]
+			end
+		end
+	end
+	if not state then
+		table.clear(noclipSaved)
+	end
+end
+
+OnCleanup(function()
+	Util.SetNoclip(false)
+end)
+
+local function PathPoints(from, to)
+	if Vector3.new(to.X - from.X, 0, to.Z - from.Z).Magnitude < 80 and math.abs(to.Y - from.Y) < 30 then
+		return { to }
+	end
+	local h = math.max(from.Y, to.Y) + Util.CruiseHeight
+	return { Vector3.new(from.X, h, from.Z), Vector3.new(to.X, h, to.Z), to }
+end
+
+function Util.TravelTime(from, to)
+	local total = 0
+	local cur = from
+	for _, p in ipairs(PathPoints(from, to)) do
+		total += (p - cur).Magnitude
+		cur = p
+	end
+	return total / math.max(Util.FlySpeed, 20)
+end
+
+function Util.FlyTo(target, cancel, tolerance)
+	local root = Util.Root()
+	if not root or typeof(target) ~= "Vector3" then
+		return false
+	end
+	local tol = tolerance or 3
+	if (root.Position - target).Magnitude <= tol then
+		return true
+	end
+	local points = PathPoints(root.Position, target)
+	local timeout = os.clock() + Util.TravelTime(root.Position, target) + 6
+	Util.SetNoclip(true)
+
+	local stepConn = RunService.Stepped:Connect(function()
+		local char = localPlayer.Character
+		if not char then
+			return
+		end
+		for _, d in ipairs(char:GetDescendants()) do
+			if d:IsA("BasePart") and d.CanCollide then
+				d.CanCollide = false
+			end
+		end
+	end)
+
+	local idx = 1
+	local arrived = false
+
+	while os.clock() < timeout do
+		if cancel and cancel() then
+			break
+		end
+		local dt = RunService.Heartbeat:Wait()
+		local r = Util.Root()
+		if not r then
+			break
+		end
+		local isLast = idx == #points
+		local delta = points[idx] - r.Position
+		local mag = delta.Magnitude
+		if mag <= (isLast and tol or 2) then
+			if isLast then
+				arrived = true
+				break
+			else
+				idx += 1
+			end
+		else
+			local step = math.min(mag, math.max(Util.FlySpeed, 20) * dt)
+			local flat = Vector3.new(delta.X, 0, delta.Z)
+			local rot = flat.Magnitude > 0.1 and CFrame.lookAt(Vector3.zero, flat.Unit) or r.CFrame.Rotation
+			pcall(function()
+				r.CFrame = CFrame.new(r.Position + delta.Unit * step) * rot
+				r.AssemblyLinearVelocity = Vector3.zero
+				r.AssemblyAngularVelocity = Vector3.zero
+			end)
+		end
+	end
+
+	stepConn:Disconnect()
+	Util.SetNoclip(false)
+
+	local result = arrived
+	local r = Util.Root()
+	if r then
+		pcall(function()
+			r.AssemblyLinearVelocity = Vector3.zero
+		end)
+		if (r.Position - target).Magnitude <= tol + 1 then
+			result = true
+		end
+	end
+	return result
+end
+
+function Util.FirePrompt(prompt)
+	if not prompt or not prompt:IsA("ProximityPrompt") then
+		return false
+	end
+	if typeof(fireproximityprompt) == "function" then
+		return pcall(fireproximityprompt, prompt)
+	end
+	return pcall(function()
+		prompt:InputHoldBegin()
+		task.wait(prompt.HoldDuration + 0.1)
+		prompt:InputHoldEnd()
+	end)
+end
+
+---------------------------------------------------------------------
+-- FARM STATE
+---------------------------------------------------------------------
+local Farm = {
+	Busy = false,
+	Manual = {},
+	Carried = {},
+	Target = nil,
+	TargetManual = false,
+	Dropped = nil,
+	LastPickupAt = 0,
+	Relaying = false,
+	PickupPos = nil,
+	Wake = function() end,
+}
+
+local running = true
+OnCleanup(function()
+	running = false
+end)
+
+local minEggRank = 0
+local targetEggs = {}
+local collectPriority = "Highest Rarity"
+local blacklist = {}
+local TRAVEL_MARGIN = 3
+local FAR_DISTANCE = 250
+
+local plantMinRank = 0
+local plantBackoffUntil = 0
+local plantBackoffCount = 0
+
+local PriorityChoices = { "Highest Luck", "Highest Rarity", "Nearest", "Farthest" }
+
+local function collectedEgg(name)
+	local attr = localPlayer:GetAttribute("CollectedEggs")
+	return type(attr) == "string" and attr ~= "" and string.find(attr, tostring(name) .. ",", 1, true) ~= nil
+end
+
+local function autoEggs(origin)
+	local list = {}
+	local top = Util.PlotTop()
+	local now = os.clock()
+
+	for _, cfg in ipairs(ActiveEggs:GetChildren()) do
+		local eggName = cfg:GetAttribute("Egg")
+		local pos = cfg:GetAttribute("Position")
+		local privateTo = cfg:GetAttribute("PrivateTo")
+		local ban = blacklist[cfg.Name]
+		local ok = type(eggName) == "string" and typeof(pos) == "Vector3" and (privateTo == nil or privateTo == localPlayer.UserId)
+		if ok then
+			ok = not (ban and ban > now)
+		end
+		if ok and not collectedEgg(eggName) then
+			local rank = Util.EggRank(eggName)
+			if rank >= minEggRank and (next(targetEggs) == nil or targetEggs[eggName]) then
+				if (top and Util.TravelTime(pos, top) or 0) < 20 - TRAVEL_MARGIN - 2 then
+					table.insert(list, {
+						Config = cfg,
+						Name = eggName,
+						Position = pos,
+						Rank = rank,
+						Luck = Util.EggLuck(eggName) * (tonumber(cfg:GetAttribute("Weight")) or 1),
+						Distance = (pos - origin).Magnitude,
+					})
+				end
+			end
+		end
+	end
+
+	table.sort(list, function(a, b)
+		if collectPriority == "Nearest" then
+			return a.Distance < b.Distance
+		end
+		if collectPriority == "Farthest" then
+			return a.Distance > b.Distance
+		end
+		if collectPriority == "Highest Rarity" then
+			if a.Rank ~= b.Rank then
+				return a.Rank > b.Rank
+			end
+			if a.Luck ~= b.Luck then
+				return a.Luck > b.Luck
+			end
+			return a.Distance < b.Distance
+		end
+		if a.Luck ~= b.Luck then
+			return a.Luck > b.Luck
+		end
+		return a.Distance < b.Distance
+	end)
+
+	return list
+end
+
+local function nextManualEgg()
+	while #Farm.Manual > 0 do
+		local cfg = ActiveEggs:FindFirstChild(Farm.Manual[1])
+		local eggName = cfg and cfg:GetAttribute("Egg")
+		local pos = cfg and cfg:GetAttribute("Position")
+		local privateTo = cfg and cfg:GetAttribute("PrivateTo")
+		if type(eggName) == "string" and typeof(pos) == "Vector3" and (privateTo == nil or privateTo == localPlayer.UserId) then
+			return { Config = cfg, Name = eggName, Position = pos, Manual = true }
+		end
+		table.remove(Farm.Manual, 1)
+	end
+	return nil
+end
+
+local function removeManual(uid)
+	local idx = table.find(Farm.Manual, uid)
+	if idx then
+		table.remove(Farm.Manual, idx)
+	end
+end
+
+local function queueManual(uid)
+	if not table.find(Farm.Manual, uid) then
+		table.insert(Farm.Manual, uid)
+	end
+	Farm.Wake()
+end
+
+local function cancelManual(uid)
+	removeManual(uid)
+	if Farm.Target == uid then
+		Farm.Dropped = uid
+	end
+end
+
+function Farm.CollectActive()
+	return On("AutoCollectEggs") or #Farm.Manual > 0
+end
+
+-- lepas telur dari basket lalu ambil lagi dekat base (supaya tidak expired saat terbang jauh)
+local function repickNearBase(base, top, cancel)
+	local root = Util.Root()
+	local basket = localPlayer:FindFirstChild("Basket")
+	if not root or not basket then
+		return
+	end
+	local lp = base.CFrame:PointToObjectSpace(root.Position)
+	local flat = Vector3.new(lp.X, 0, lp.Z)
+	if flat.Magnitude < 1 then
+		flat = Vector3.new(0, 0, 1)
+	end
+	local hx, hz = base.Size.X / 2, base.Size.Z / 2
+	local unit = flat.Unit
+	local scaled = unit / math.max(math.abs(unit.X) / (hx + 20), math.abs(unit.Z) / (hz + 20))
+	local w = base.CFrame:PointToWorldSpace(Vector3.new(scaled.X, 0, scaled.Z))
+	local hover = Vector3.new(w.X, top.Y + 4, w.Z)
+
+	Util.FlyTo(hover, cancel, 4)
+	local r = Util.Root()
+	if not r or (r.Position - hover).Magnitude > 10 then
+		return
+	end
+
+	Util.Status = "Re-picking eggs near base"
+	local untilT = os.clock() + 0.3
+	while os.clock() < untilT do
+		local rr = Util.Root()
+		if rr then
+			pcall(function()
+				rr.CFrame = CFrame.new(hover) * rr.CFrame.Rotation
+				rr.AssemblyLinearVelocity = Vector3.zero
+			end)
+		end
+		RunService.Heartbeat:Wait()
+	end
+
+	local known = {}
+	for _, child in ipairs(ActiveEggs:GetChildren()) do
+		known[child] = true
+	end
+
+	local names = {}
+	for _, child in ipairs(basket:GetChildren()) do
+		local e = child:GetAttribute("Egg")
+		if type(e) == "string" then
+			table.insert(names, e)
+		end
+	end
+
+	local dropped = {}
+	Farm.Relaying = true
+	for _, e in ipairs(names) do
+		Util.Fire("BasketDrop", e)
+	end
+
+	local deadline = os.clock() + 3
+	while #dropped < #names and os.clock() < deadline do
+		for _, child in ipairs(ActiveEggs:GetChildren()) do
+			if not known[child] and child:GetAttribute("OriginPosition") ~= nil and typeof(child:GetAttribute("Position")) == "Vector3" then
+				known[child] = true
+				table.insert(dropped, child)
+			end
+		end
+		RunService.Heartbeat:Wait()
+	end
+
+	for _, egg in ipairs(dropped) do
+		local pos = egg:GetAttribute("Position")
+		for _ = 1, 3 do
+			if egg.Parent ~= nil then
+				if typeof(pos) == "Vector3" then
+					Util.FlyTo(pos + Vector3.new(0, 3, 0), nil, 5)
+				end
+				local before = Util.BasketCount()
+				Farm.LastPickupAt = os.clock()
+				Util.Fire("EggPickup", egg.Name)
+				local t = os.clock() + 1.5
+				while Util.BasketCount() == before and os.clock() < t do
+					RunService.Heartbeat:Wait()
+				end
+				if not (before < Util.BasketCount()) then
+					continue
+				end
+			end
+			break
+		end
+		if egg.Parent ~= nil and not table.find(Farm.Manual, egg.Name) then
+			table.insert(Farm.Manual, 1, egg.Name)
+		end
+	end
+
+	Farm.Relaying = false
+end
+
+function Farm.Deliver(cancel)
+	if Util.BasketCount() <= 0 then
+		return true
+	end
+	local top = Util.PlotTop()
+	local base = Util.PlotBase()
+	if not top or not base then
+		return false
+	end
+
+	Util.Status = "Bringing eggs home"
+	local root = Util.Root()
+	local pickupPos = Farm.PickupPos or (root and root.Position)
+	if pickupPos and (pickupPos - top).Magnitude > FAR_DISTANCE then
+		repickNearBase(base, top, cancel)
+		Util.Status = "Bringing eggs home"
+	end
+
+	Util.FlyTo(top + Vector3.new(0, 4, 0), cancel, 4)
+	local t = os.clock() + 3
+	while Util.BasketCount() > 0 and os.clock() < t do
+		RunService.Heartbeat:Wait()
+	end
+
+	if Util.BasketCount() == 0 then
+		table.clear(Farm.Carried)
+		Farm.PickupPos = nil
+	end
+	return Util.BasketCount() == 0
+end
+
+function Farm.CollectStep(shouldStop)
+	if not Util.Root() then
+		return false
+	end
+	local capacity = Util.BasketCapacity()
+	local collectedAny = false
+
+	while Util.BasketCount() < capacity do
+		if shouldStop() then
+			break
+		end
+
+		-- jangan ambil telur baru kalau telur di basket hampir pecah
+		local deadline = Util.BasketDeadline()
+		local top = Util.PlotTop()
+		if deadline and top then
+			local r = Util.Root()
+			local remaining = deadline - workspace:GetServerTimeNow() - (r and Util.TravelTime(r.Position, top) or 0)
+			if remaining < TRAVEL_MARGIN + 4 then
+				break
+			end
+		end
+
+		local root = Util.Root()
+		if not root then
+			break
+		end
+
+		local target = nextManualEgg()
+		if not target and On("AutoCollectEggs") then
+			for _, cand in ipairs(autoEggs(root.Position)) do
+				if not table.find(Farm.Manual, cand.Config.Name) then
+					target = cand
+					break
+				end
+			end
+		end
+
+		if not target then
+			if not collectedAny then
+				Util.Status = "No egg matches the filters"
+			end
+			break
+		end
+
+		local uid = target.Config.Name
+		Farm.Target = uid
+		Farm.TargetManual = target.Manual == true
+		Farm.Dropped = nil
+		Util.Status = string.format("Collecting %s", target.Name)
+
+		local reached = Util.FlyTo(target.Position + Vector3.new(0, 3, 0), function()
+			return shouldStop() or target.Config.Parent == nil or Farm.Dropped == uid
+		end, 6)
+
+		if Farm.Dropped == uid then
+			Farm.Target = nil
+			Farm.Dropped = nil
+			continue
+		end
+
+		if target.Config.Parent == nil and not reached then
+			removeManual(uid)
+			Farm.Target = nil
+			continue
+		elseif not reached then
+			blacklist[uid] = os.clock() + 20
+			removeManual(uid)
+			Farm.Target = nil
+			break
+		end
+
+		local before = Util.BasketCount()
+		Farm.LastPickupAt = os.clock()
+		if before == 0 then
+			Farm.PickupPos = target.Position
+		end
+
+		Util.Fire("EggPickup", uid)
+		local t = os.clock() + 1.2
+		while Util.BasketCount() == before do
+			local now = os.clock()
+			if now >= t and (target.Config.Parent ~= nil or now >= t + 1.5) then
+				break
+			end
+			RunService.Heartbeat:Wait()
+		end
+
+		removeManual(uid)
+		Farm.Target = nil
+
+		if before < Util.BasketCount() then
+			Farm.Carried[uid] = target.Config
+			collectedAny = true
+		else
+			blacklist[uid] = os.clock() + 20
+		end
+	end
+
+	Farm.Target = nil
+	if Util.BasketCount() > 0 then
+		Farm.Deliver(nil)
+	end
+	return collectedAny
+end
+
+---------------------------------------------------------------------
+-- PLANT & HATCH
+---------------------------------------------------------------------
+local function plotEggs()
+	local plot = Util.Plot()
+	local eggs = plot and plot:FindFirstChild("Eggs")
+	return eggs and eggs:GetChildren() or {}
+end
+
+local function plotPets()
+	local plot = Util.Plot()
+	local pets = plot and plot:FindFirstChild("Pets")
+	return pets and pets:GetChildren() or {}
+end
+
+local function occupiedPoints()
+	local points = {}
+	for _, egg in ipairs(plotEggs()) do
+		local ok, p = pcall(function()
+			return egg:GetPivot().Position
+		end)
+		if ok then
+			table.insert(points, p)
+		end
+	end
+	for _, pet in ipairs(plotPets()) do
+		local ok, p = pcall(function()
+			return pet:GetPivot().Position
+		end)
+		if ok then
+			table.insert(points, p)
+		end
+	end
+	return points
+end
+
+function Farm.PlantStep(cancel)
+	if os.clock() < plantBackoffUntil and #plotEggs() >= plantBackoffCount then
+		return false
+	end
+
+	local tools = {}
+	for _, tool in ipairs(Util.Tools("Egg")) do
+		if plantMinRank <= Util.EggRank(tool.Name) then
+			table.insert(tools, tool)
+		end
+	end
+	if #tools == 0 then
+		return false
+	end
+
+	table.sort(tools, function(a, b)
+		return Util.EggLuck(a.Name) > Util.EggLuck(b.Name)
+	end)
+
+	local placed = 0
+	for _, tool in ipairs(tools) do
+		if cancel() then
+			break
+		end
+		if not tool.Parent then
+			continue
+		end
+		local pos = Util.RandomPlotPoint(8, occupiedPoints(), 5)
+		if not pos then
+			break
+		end
+		Util.Status = string.format("Planting %s", tool.Name)
+		if not Util.Equip(tool) then
+			break
+		end
+		local before = #plotEggs()
+		Util.Fire("EggPlaced", { PlantPosition = pos })
+		local t = os.clock() + 1.2
+		while os.clock() < t and #plotEggs() == before do
+			RunService.Heartbeat:Wait()
+		end
+		if before < #plotEggs() then
+			placed += 1
+		else
+			plantBackoffUntil = os.clock() + 15
+			plantBackoffCount = #plotEggs()
+			break
+		end
+	end
+
+	Util.Unequip()
+	return placed > 0
+end
+
+local function readyEggs()
+	local list = {}
+	for _, egg in ipairs(plotEggs()) do
+		local timer = egg:FindFirstChild("Timer", true)
+		local hatch = egg:FindFirstChild("Hatch", true)
+		if hatch and hatch:IsA("ProximityPrompt") and hatch.Enabled and timer and timer:IsA("TextLabel") and timer.Text == "Ready" then
+			table.insert(list, { Egg = egg, Prompt = hatch })
+		end
+	end
+	return list
+end
+
+function Farm.HatchWanted()
+	return On("AutoHatchEggs") and #readyEggs() > 0
+end
+
+function Farm.HatchStep(cancel)
+	local hatched = 0
+	for _, item in ipairs(readyEggs()) do
+		if cancel() then
+			break
+		end
+		if item.Egg.Parent then
+			local ok, pos = pcall(function()
+				return item.Egg:GetPivot().Position
+			end)
+			if ok then
+				Util.Status = "Hatching eggs"
+				Util.FlyTo(pos + Vector3.new(0, 3, 3), cancel, 5)
+				Util.FirePrompt(item.Prompt)
+				local t = os.clock() + 2
+				while os.clock() < t and item.Egg.Parent do
+					RunService.Heartbeat:Wait()
+				end
+				if not item.Egg.Parent then
+					hatched += 1
+				end
+			end
+		end
+	end
+	if hatched > 0 then
+		task.wait(0.5)
+		Util.Unequip()
+	end
+	return hatched > 0
+end
+
+---------------------------------------------------------------------
+-- PETS
+---------------------------------------------------------------------
+local foodSelected = {}
+local feedCooldown = {}
+
+local foodChoices = {}
+do
+	if type(Data.Foods) == "table" then
+		local tmp = {}
+		for name, food in pairs(Data.Foods) do
+			if type(food) == "table" then
+				table.insert(tmp, { Name = name, Cost = tonumber(food.Cost) or 0 })
+			end
+		end
+		table.sort(tmp, function(a, b)
+			return a.Cost < b.Cost
+		end)
+		for _, f in ipairs(tmp) do
+			table.insert(foodChoices, f.Name)
+		end
+	end
+end
+
+local function maxPets()
+	return math.max(1, tonumber(localPlayer:GetAttribute("MaxPets")) or tonumber(Util.Saved("MaxPets")) or 5)
+end
+
+local function placedPetScore(pet)
+	return Util.PetScore(pet:GetAttribute("PetName") or pet.Name, pet:GetAttribute("Weight"), pet:GetAttribute("Mutation"))
+end
+
+local function toolPetScore(tool)
+	return Util.PetScore(Util.PetNameOf(tool), tool:GetAttribute("Weight"), tool:GetAttribute("Mutation"))
+end
+
+local function bestInventoryPet()
+	local bestScore, best = -1, nil
+	for _, tool in ipairs(Util.Tools("Pet")) do
+		local s = toolPetScore(tool)
+		if s > bestScore then
+			bestScore, best = s, tool
+		end
+	end
+	return best, bestScore
+end
+
+local function weakestPlacedPet()
+	local weakScore, weak = math.huge, nil
+	for _, pet in ipairs(plotPets()) do
+		local s = placedPetScore(pet)
+		if s < weakScore then
+			weakScore, weak = s, pet
+		end
+	end
+	return weak, weakScore
+end
+
+function Farm.PlaceWanted()
+	if not On("AutoPlaceBestPets") then
+		return false
+	end
+	local best, bestScore = bestInventoryPet()
+	if not best then
+		return false
+	end
+	if #plotPets() < maxPets() then
+		return true
+	end
+	if On("SwapWeakerPets") then
+		local _, weakScore = weakestPlacedPet()
+		return bestScore > weakScore * 1.05
+	end
+	return false
+end
+
+local function placePet(tool, cancel)
+	local key = tool:GetAttribute("PetKey")
+	if not key then
+		return false
+	end
+	local top = Util.PlotTop()
+	if top then
+		Util.FlyTo(top + Vector3.new(0, 4, 0), cancel, 20)
+	end
+	if not Util.Equip(tool) then
+		return false
+	end
+	local pos = Util.RandomPlotPoint(10, nil, 0)
+	if not pos then
+		return false
+	end
+	local before = #plotPets()
+	Util.Fire("PlacePet", key, pos + Vector3.new(0, 2, 0))
+	task.wait(0.35)
+	Util.Unequip()
+	local t = os.clock() + 1.5
+	while os.clock() < t and #plotPets() == before do
+		RunService.Heartbeat:Wait()
+	end
+	return #plotPets() > before
+end
+
+function Farm.PlaceStep(cancel)
+	local placed = 0
+	for _ = 1, maxPets() do
+		if cancel() or not Farm.PlaceWanted() then
+			break
+		end
+		local tool = bestInventoryPet()
+		if not tool then
+			break
+		end
+
+		if #plotPets() < maxPets() then
+			Util.Status = string.format("Placing %s", Util.PetNameOf(tool))
+			if placePet(tool, cancel) then
+				placed += 1
+				continue
+			end
+			break
+		end
+
+		local weak = weakestPlacedPet()
+		local key = weak and weak:GetAttribute("PetKey")
+		if not key then
+			break
+		end
+		Util.Status = "Swapping in a stronger pet"
+		local top = Util.PlotTop()
+		if top then
+			Util.FlyTo(top + Vector3.new(0, 4, 0), cancel, 20)
+		end
+		Util.Fire("PickupPet", key)
+		local t = os.clock() + 1.5
+		while os.clock() < t and weak.Parent do
+			RunService.Heartbeat:Wait()
+		end
+		if not weak.Parent then
+			Util.Status = string.format("Placing %s", Util.PetNameOf(tool))
+			if placePet(tool, cancel) then
+				placed += 1
+				continue
+			end
+		end
+		break
+	end
+	return placed > 0
+end
+
+local function cheapestFoodTool()
+	local bestCost, best = math.huge, nil
+	for _, tool in ipairs(Util.Tools("Food")) do
+		local amount = tool:FindFirstChild("Amount", true)
+		if (amount and tonumber(amount.Value) or 1) > 0 and (next(foodSelected) == nil or foodSelected[tool.Name]) then
+			local d = type(Data.Foods) == "table" and Data.Foods[tool.Name] or nil
+			local cost = type(d) == "table" and tonumber(d.Cost) or 0
+			if cost < bestCost then
+				bestCost, best = cost, tool
+			end
+		end
+	end
+	return best
+end
+
+function Farm.FeedWanted()
+	if not On("AutoFeedPets") or not cheapestFoodTool() then
+		return false
+	end
+	local now = os.clock()
+	for _, pet in ipairs(plotPets()) do
+		local key = pet:GetAttribute("PetKey")
+		if key and (feedCooldown[key] or 0) <= now then
+			return true
+		end
+	end
+	return false
+end
+
+function Farm.FeedStep(cancel)
+	local pets = plotPets()
+	table.sort(pets, function(a, b)
+		return placedPetScore(a) > placedPetScore(b)
+	end)
+
+	local fed = 0
+	for _, pet in ipairs(pets) do
+		if cancel() then
+			break
+		end
+		local key = pet:GetAttribute("PetKey")
+		local food = cheapestFoodTool()
+		if not food then
+			break
+		end
+		if key and (feedCooldown[key] or 0) <= os.clock() then
+			local ok, pos = pcall(function()
+				return pet:GetPivot().Position
+			end)
+			if ok then
+				Util.Status = string.format("Feeding %s", tostring(pet:GetAttribute("PetName") or pet.Name))
+				Util.FlyTo(pos + Vector3.new(0, 4, 4), cancel, 8)
+				if Util.Equip(food) then
+					local age = pet:GetAttribute("Age")
+					Util.Fire("FeedPet", key, food.Name)
+					local t = os.clock() + 1.2
+					while os.clock() < t and pet:GetAttribute("Age") == age do
+						RunService.Heartbeat:Wait()
+					end
+					feedCooldown[key] = os.clock() + 2
+					fed += 1
+				end
+			end
+		end
+	end
+	Util.Unequip()
+	return fed > 0
+end
+
+---------------------------------------------------------------------
+-- MAIN FARM LOOP
+---------------------------------------------------------------------
+do
+	local wake = false
+
+	Farm.Wake = function()
+		wake = true
+	end
+
+	local function carrying()
+		if Util.BasketCount() <= 0 then
+			return false
+		end
+		return next(Farm.Carried) ~= nil or os.clock() - Farm.LastPickupAt < 30
+	end
+
+	local function anythingWanted()
+		return Farm.CollectActive() or carrying() or On("AutoPlantEggs") or On("AutoHatchEggs") or On("AutoPlaceBestPets") or On("AutoFeedPets")
+	end
+
+	local function shouldStop()
+		return not running or not anythingWanted()
+	end
+
+	local function stopUnless(flag)
+		return function()
+			return shouldStop() or not On(flag)
+		end
+	end
+
+	task.spawn(function()
+		while running do
+			local didWork = false
+
+			if anythingWanted() and Util.Root() and Util.Plot() then
+				Farm.Busy = true
+
+				local ok = pcall(function()
+					if Util.BasketCount() > 0 then
+						Farm.Deliver(shouldStop)
+						didWork = true
+					end
+					if On("AutoPlantEggs") and not shouldStop() then
+						if Farm.PlantStep(stopUnless("AutoPlantEggs")) then
+							didWork = true
+						end
+					end
+					if Farm.HatchWanted() and not shouldStop() then
+						if Farm.HatchStep(stopUnless("AutoHatchEggs")) then
+							didWork = true
+						end
+					end
+					if Farm.PlaceWanted() and not shouldStop() then
+						if Farm.PlaceStep(stopUnless("AutoPlaceBestPets")) then
+							didWork = true
+						end
+					end
+					if Farm.FeedWanted() and not shouldStop() then
+						if Farm.FeedStep(stopUnless("AutoFeedPets")) then
+							didWork = true
+						end
+					end
+					if Farm.CollectActive() and not shouldStop() then
+						if Farm.CollectStep(function()
+							return shouldStop() or not Farm.CollectActive()
+						end) then
+							didWork = true
+						end
+					end
+				end)
+
+				if not ok then
+					Util.Unequip()
+				end
+
+				Farm.Busy = false
+
+				if not didWork and not On("AutoCollectEggs") then
+					Util.Status = "Waiting for work"
+				end
+			elseif not anythingWanted() then
+				Util.Status = "Idle"
+			end
+
+			local waitTime = didWork and 0.15 or 1
+			local untilT = os.clock() + waitTime
+			while running and os.clock() < untilT and not wake do
+				RunService.Heartbeat:Wait()
+			end
+			wake = false
+		end
+	end)
+end
+
+---------------------------------------------------------------------
+-- AUTO SHOP
+---------------------------------------------------------------------
+local ShopSelected = { Food = {}, Gears = {} }
+local shopStock = { Food = nil, Gears = nil }
+local shopCooldown = {}
+local keepCash = 0
+local ShopFlags = { Food = "AutoBuyFood", Gears = "AutoBuyRadars" }
+
+local function shopNames(category)
+	local list = {}
+	local shop = Data.Shop
+	local cat = type(shop) == "table" and shop[category] or nil
+	if type(cat) == "table" then
+		for name, item in pairs(cat) do
+			if type(item) == "table" then
+				table.insert(list, { Name = name, Price = tonumber(item.Price) or 0 })
+			end
+		end
+	end
+	table.sort(list, function(a, b)
+		return a.Price < b.Price
+	end)
+	local names = {}
+	for _, it in ipairs(list) do
+		table.insert(names, it.Name)
+	end
+	return names
+end
+
+local function shopPrice(category, name)
+	local shop = Data.Shop
+	local cat = type(shop) == "table" and shop[category] or nil
+	local item = type(cat) == "table" and cat[name] or nil
+	return type(item) == "table" and tonumber(item.Price) or math.huge
+end
+
+local function readStock(payload)
+	if type(payload) ~= "table" then
+		return
+	end
+	for key, group in pairs(payload) do
+		if (key == "Food" or key == "Gears") and type(group) == "table" then
+			local stock = {}
+			for itemName, info in pairs(group) do
+				if type(info) == "table" then
+					stock[itemName] = tonumber(info.Amount) or info.InStock and 1 or 0
+				end
+			end
+			shopStock[key] = stock
+		end
+	end
 end
 
 do
-    local cleaned = {}
-    for k, v in pairs(AE) do local n = normKey(k) if n ~= "" then cleaned[n] = v end end
-    AE = cleaned
-end
-PL = resortList(PL)
-AG_EGGS = resortList(AG_EGGS)
-
-local function saveAll()
-    saveD({SYS=SYS,LM=LM,EE=EE,SP=SP,WN=WN,WT=WT,VR=VR,PR=PR,AE=AE,SE=SE,PL=PL,AG_EGGS=AG_EGGS,noclip=noclipEnabled,infJump=infJumpEnabled,antiAfk=ANTI_AFK,hideNotif=HIDE_NOTIF})
-end
-
-for _, o in ipairs(EF:GetDescendants()) do
-    if o:IsA("ProximityPrompt") then o.HoldDuration = 0; o.RequiresLineOfSight = false end
-end
-C(EF.DescendantAdded:Connect(function(o)
-    if K then return end
-    if o:IsA("ProximityPrompt") then o.HoldDuration = 0; o.RequiresLineOfSight = false end
-end))
-local P1 = Vector3.new(-4914.52100, 41295.43359, -3705.13477)
-local P3 = Vector3.new(-4968.01562, 41281.78906, -3650.59204)
-local busy = false
-C(RS.Stepped:Connect(function()
-    if K or not noclipEnabled or not pl.Character then return end
-    for _, v in pairs(pl.Character:GetDescendants()) do
-        if v:IsA("BasePart") and v.CanCollide then v.CanCollide = false end
-    end
-end))
-C(UIS.JumpRequest:Connect(function()
-    if K or not infJumpEnabled or not pl.Character then return end
-    local h = pl.Character:FindFirstChildOfClass("Humanoid")
-    if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
-end))
-C(pl.Idled:Connect(function()
-    if K or not ANTI_AFK then return end
-    pcall(function() VU:CaptureController(); VU:ClickButton2(Vector2.new()) end)
-end))
-
-local NotifGui = Instance.new("ScreenGui")
-NotifGui.Name = "MacHxNotifs"
-NotifGui.ResetOnSpawn = false
-NotifGui.IgnoreGuiInset = true
-NotifGui.DisplayOrder = 9999
-NotifGui.Parent = pg
-local Holder = Instance.new("Frame")
-Holder.AnchorPoint = Vector2.new(1,0)
-Holder.Position = UDim2.new(1,-20,0,20)
-Holder.Size = UDim2.new(0,340,1,-40)
-Holder.BackgroundTransparency = 1
-Holder.Parent = NotifGui
-local NL = Instance.new("UIListLayout", Holder)
-NL.Padding = UDim.new(0,10)
-NL.SortOrder = Enum.SortOrder.LayoutOrder
-NL.VerticalAlignment = Enum.VerticalAlignment.Top
-NL.HorizontalAlignment = Enum.HorizontalAlignment.Right
-local PRS = {
-    info={C=Color3.fromRGB(90,140,255),I="i",L="INFO"},
-    success={C=Color3.fromRGB(0,220,120),I="✓",L="SUCCESS"},
-    warning={C=Color3.fromRGB(255,180,0),I="!",L="WARNING"},
-    error={C=Color3.fromRGB(255,60,60),I="✕",L="ERROR"},
-    system={C=Color3.fromRGB(180,90,255),I="★",L="MacHx"}
-}
-local function note(msg, t)
-    if K or HIDE_NOTIF then return end
-    t = t or "info"
-    local p = PRS[t] or PRS.info
-    local f = Instance.new("Frame")
-    f.Size = UDim2.new(1,0,0,66)
-    f.BackgroundColor3 = Color3.fromRGB(18,16,28)
-    f.BackgroundTransparency = 0.05
-    f.BorderSizePixel = 0
-    f.Position = UDim2.new(1,380,0,0)
-    f.Parent = Holder
-    Instance.new("UICorner", f).CornerRadius = UDim.new(0,10)
-    local s = Instance.new("UIStroke", f)
-    s.Color = p.C; s.Thickness = 1.5; s.Transparency = 0.4
-    local bar = Instance.new("Frame", f)
-    bar.Size = UDim2.new(0,4,1,-12); bar.Position = UDim2.new(0,6,0,6)
-    bar.BackgroundColor3 = p.C; bar.BorderSizePixel = 0
-    Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
-    local ic = Instance.new("TextLabel", f)
-    ic.Size = UDim2.new(0,34,0,34); ic.Position = UDim2.new(0,18,0,16)
-    ic.BackgroundColor3 = p.C; ic.BackgroundTransparency = 0.85
-    ic.Text = p.I; ic.TextColor3 = p.C; ic.TextSize = 22; ic.Font = Enum.Font.GothamBlack
-    Instance.new("UICorner", ic).CornerRadius = UDim.new(1,0)
-    local ti = Instance.new("TextLabel", f)
-    ti.Position = UDim2.new(0,62,0,8); ti.Size = UDim2.new(1,-78,0,16)
-    ti.BackgroundTransparency = 1
-    ti.Text = "MacHx  •  " .. p.L
-    ti.TextColor3 = p.C; ti.Font = Enum.Font.GothamBold; ti.TextSize = 11
-    ti.TextXAlignment = Enum.TextXAlignment.Left
-    local bo = Instance.new("TextLabel", f)
-    bo.Position = UDim2.new(0,62,0,26); bo.Size = UDim2.new(1,-78,0,34)
-    bo.BackgroundTransparency = 1; bo.Text = tostring(msg)
-    bo.TextColor3 = Color3.fromRGB(230,225,245); bo.Font = Enum.Font.Gotham
-    bo.TextSize = 13; bo.TextXAlignment = Enum.TextXAlignment.Left
-    bo.TextYAlignment = Enum.TextYAlignment.Top; bo.TextWrapped = true
-    local pr = Instance.new("Frame", f)
-    pr.Size = UDim2.new(1,-14,0,2); pr.Position = UDim2.new(0,7,1,-5)
-    pr.BackgroundColor3 = p.C; pr.BorderSizePixel = 0
-    Instance.new("UICorner", pr).CornerRadius = UDim.new(1,0)
-    TS:Create(f, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position=UDim2.new(0,0,0,0)}):Play()
-    TS:Create(pr, TweenInfo.new(5, Enum.EasingStyle.Linear), {Size=UDim2.new(0,0,0,2)}):Play()
-    task.delay(5, function()
-        if not f.Parent then return end
-        TS:Create(f, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position=UDim2.new(1,380,0,0), BackgroundTransparency=1}):Play()
-        TS:Create(s, TweenInfo.new(0.3), {Transparency=1}):Play()
-        task.wait(0.35); pcall(function() f:Destroy() end)
-    end)
-    local kids = {}
-    for _, c in ipairs(Holder:GetChildren()) do if c:IsA("Frame") then table.insert(kids, c) end end
-    if #kids > 6 then kids[1]:Destroy() end
-end
-local function info(m) note(m,"info") end
-local function ok(m) note(m,"success") end
-local function warn(m) note(m,"warning") end
-local function err(m) note(m,"error") end
-local function sys(m) note(m,"system") end
-
-local function nm(s) return tostring(s or ""):lower():gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","") end
-local function RT() local c = pl.Character return c and c:FindFirstChild("HumanoidRootPart") end
-local function GP(o)
-    if not o then return nil end
-    if o:IsA("BasePart") then return o.Position end
-    if o:IsA("Model") then
-        if o.PrimaryPart then return o.PrimaryPart.Position end
-        local s, p = pcall(function() return o:GetPivot() end)
-        if s then return p.Position end
-    end
-    local b = o:FindFirstChildWhichIsA("BasePart", true)
-    return b and b.Position
-end
-local function MT(e,k) return nm(e.Name):find(nm(k),1,true) ~= nil end
-local function TP(p) local r = RT() if not r then return false end r.CFrame = CFrame.new(p) return true end
-local function TW(p)
-    if not (SYS or AG_TARGET) then return false end
-    local r = RT() if not r then return false end
-    local d = (r.Position - p).Magnitude
-    if d <= 1 then return true end
-    local t = TS:Create(r, TweenInfo.new(d/SP, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {CFrame=CFrame.new(p)})
-    t:Play(); t.Completed:Wait()
-    return (SYS or AG_TARGET) and r.Parent ~= nil
+	for _, remoteName in ipairs({ "Restock", "ShopStock" }) do
+		local remote = Remotes:FindFirstChild(remoteName)
+		if remote and remote:IsA("RemoteEvent") then
+			local conn = remote.OnClientEvent:Connect(readStock)
+			OnCleanup(function()
+				conn:Disconnect()
+			end)
+		end
+	end
+	Util.Fire("ShopStock")
 end
 
-local VOLCANO_TOP = Vector3.new(-5103.076, 41405.484, -3460.646)
-local function TT() local r = RT() if not r then return false end r.CFrame = CFrame.new(VOLCANO_TOP) return true end
-local function TP2() return VOLCANO_TOP end
-local function HoldAtTop(duration)
-    local endT = os.clock() + duration
-    while os.clock() < endT and not K do
-        local r = RT()
-        if not r then break end
-        local dist = (r.Position - VOLCANO_TOP).Magnitude
-        if dist > 0.5 then
-            local t = TS:Create(r, TweenInfo.new(dist / SP, Enum.EasingStyle.Linear), {CFrame = CFrame.new(VOLCANO_TOP)})
-            t:Play()
-            t.Completed:Wait()
-        else
-            r.CFrame = CFrame.new(VOLCANO_TOP)
-            RS.RenderStepped:Wait()
-        end
-    end
-end
-task.spawn(function() task.wait(2) sys("VolcanoTop set") end)
-
-local function FireDip()
-    local ok2 = pcall(function() R.packages.Net["RE/VolcanoDip"]:FireServer() end)
-    if ok2 then info("VolcanoDip fired") else warn("VolcanoDip failed") end
-    return ok2
+local function ownedCount(name)
+	local count = 0
+	for _, container in ipairs({ localPlayer:FindFirstChildOfClass("Backpack"), localPlayer.Character }) do
+		if container then
+			for _, child in ipairs(container:GetChildren()) do
+				if child:IsA("Tool") and string.gsub(child.Name, "%s*%[.*$", "") == name then
+					local amount = child:FindFirstChild("Amount", true)
+					count += amount and tonumber(amount.Value) or 1
+				end
+			end
+		end
+	end
+	return count
 end
 
-local function findPlot(ownerPlayer)
-    if not ownerPlayer then return nil end
-    local ps = workspace:FindFirstChild("Plots")
-    if not ps then return nil end
-    for _, p in ipairs(ps:GetChildren()) do
-        local d = p:FindFirstChild("Data")
-        local o = d and d:FindFirstChild("Owner")
-        if o then
-            local m = false
-            if o:IsA("ObjectValue") then m = o.Value == ownerPlayer
-            elseif o:IsA("StringValue") then m = o.Value == ownerPlayer.Name or o.Value == ownerPlayer.DisplayName
-            elseif o:IsA("IntValue") or o:IsA("NumberValue") then m = o.Value == ownerPlayer.UserId end
-            if m then return p end
-        end
-    end
-    return nil
-end
+local function autoBuy(category)
+	if not On(ShopFlags[category]) then
+		return
+	end
+	local opened = false
 
-local function HM()
-    if AG_TARGET then
-        local plot = findPlot(AG_TARGET)
-        if not plot then
-            warn("Give: no plot for " .. AG_TARGET.Name)
-            return false
-        end
-        local r = RT()
-        if not r then
-            warn("Give: no root part")
-            return false
-        end
-        info("Going to " .. AG_TARGET.Name .. "'s plot")
-        r.CFrame = plot:GetPivot() + Vector3.new(0, 5, 0)
-        task.wait(0.5)
-        if not K then
-            local ok2 = pcall(function() R.Remotes.Game.BasketDrop:FireServer() end)
-            if ok2 then
-                ok("Given to " .. AG_TARGET.Name)
-            else
-                warn("BasketDrop failed")
-            end
-        end
-        return true
-    end
-    local plot = findPlot(pl)
-    if plot then
-        local r = RT()
-        if r then r.CFrame = plot:GetPivot() + Vector3.new(0,5,0) return true end
-    end
-    return false
-end
+	for _, item in ipairs(shopNames(category)) do
+		if ShopSelected[category][item] then
+			local price = shopPrice(category, item)
+			local stockTbl = shopStock[category]
+			local stock = stockTbl and stockTbl[item]
+			local canTry = stock == nil
+			if canTry then
+				canTry = (shopCooldown[category .. item] or 0) <= os.clock()
+			end
+			canTry = canTry or (stock ~= nil and stock > 0)
 
-local function FE()
-    local list = (AG_TARGET and AG_EGGS) or PL
-    if not list or #list == 0 then list = PL end
-    for _, k in ipairs(list) do
-        for _, e in ipairs(EF:GetChildren()) do
-            if MT(e, k) then return e, k end
-        end
-    end
-end
-local function WG(e) while (SYS or AG_TARGET) and not K and e and e.Parent do task.wait(0.5) end return e and not e.Parent end
-local function UQ()
-    task.wait(2)
-    local c = pl.Character local h = c and c:FindFirstChildOfClass("Humanoid")
-    if h then h:UnequipTools() end
-end
+			local tries = 0
+			while canTry and tries < 20 and Util.Cash() - price >= keepCash do
+				if not opened then
+					Util.Fire("SetOpenShop", category)
+					task.wait(0.15)
+					opened = true
+				end
 
-local function pV(e)
-    if not e or not e.Parent or K or not TP(P1) then return end
-    local r = RT()
-    if r then r.Anchored = true info("P1 lock") task.wait(5) if r.Parent then r.Anchored = false end end
-    if not TW(P3) then return end
-    task.wait(0.2)
-    if not e.Parent then HM() return end
-    local p = GP(e) if not p then HM() return end
-    if not TW(p) then return end
-    local d = WG(e)
-    if not (SYS or AG_TARGET) or K then return end
-    if not d then HM() return end
-    ok("Volcanic gone")
-    TP(P3) task.wait(0.2)
-    if not TW(P1) then return end
-    task.wait(0.2)
-    if not TT() then HM() return end
-    info("At top")
-    task.wait(0.3)
-    if not K and LM then FireDip() end
-    HoldAtTop(math.max(WT - 0.3, 0))
-    HM() UQ()
-end
+				local before = ownedCount(item)
+				Util.Fire("BuyWithCash", category, item)
+				tries += 1
 
-local function pN(e)
-    if not e or not e.Parent or K then return end
-    local p = GP(e) if not p then HM() return end
-    if not TP(p) then return end
-    info("At egg")
-    while e and e.Parent and (SYS or AG_TARGET) and not K do
-        local cp = GP(e) if not cp then break end
-        local r = RT() if not r then break end
-        local d = (r.Position - cp).Magnitude
-        local t = TS:Create(r, TweenInfo.new(math.max(d/SP,0.05), Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {CFrame=CFrame.new(cp)})
-        t:Play(); t.Completed:Wait(); task.wait(0.05)
-    end
-    if not (SYS or AG_TARGET) or K then return end
-    ok("Egg gone")
-    if LM then
-        info("Top")
-        if TT() then
-            task.wait(0.3)
-            if not K then FireDip() end
-            HoldAtTop(math.max(WT - 0.3, 0))
-        end
-    end
-    HM() UQ()
+				local t = os.clock() + 0.8
+				while os.clock() < t and ownedCount(item) <= before do
+					RunService.Heartbeat:Wait()
+				end
+
+				if ownedCount(item) > before then
+					if stockTbl and stockTbl[item] then
+						stockTbl[item] = math.max(0, stockTbl[item] - 1)
+						canTry = stockTbl[item] > 0
+					end
+				else
+					if stockTbl then
+						stockTbl[item] = 0
+					end
+					shopCooldown[category .. item] = os.clock() + 30
+					canTry = false
+				end
+			end
+		end
+	end
 end
 
 task.spawn(function()
-    while not K do
-        if (SYS or AG_TARGET) and not busy then
-            local e, k = FE()
-            if e then
-                busy = true
-                if k == "volcanic" then pV(e) else pN(e) end
-                if (SYS or AG_TARGET) and not K then task.wait(WN) end
-                busy = false
-            else task.wait(1) end
-        else task.wait(0.2) end
-    end
+	while running do
+		pcall(autoBuy, "Food")
+		pcall(autoBuy, "Gears")
+		task.wait(3)
+	end
 end)
 
-local wI = false
-C(RS.Heartbeat:Connect(function()
-    if K then wI = false return end
-    if not LM then wI = false return end
-    if not SYS and not AG_TARGET then wI = false return end
-    local r = RT()
-    local t2 = TP2()
-    if not r or not t2 then wI = false return end
-    local dist = (r.Position - t2).Magnitude
-    if dist <= VR and not wI then
-        wI = true
-        task.wait(0.3)
-        if K then return end
-        FireDip()
-    elseif dist > VR then
-        wI = false
-    end
-end))
+---------------------------------------------------------------------
+-- AUTO REBIRTH / INDEX
+---------------------------------------------------------------------
+local function rebirthCost()
+	local rebirths = Data.Rebirths
+	local current = tonumber(Util.Saved("Rebirths")) or 0
+	if type(rebirths) ~= "table" then
+		return nil
+	end
+	local cap = tonumber(rebirths.Cap)
+	if cap and current >= cap then
+		return nil
+	end
+	if type(rebirths.GetCost) == "function" then
+		local ok, result = pcall(rebirths.GetCost, current)
+		if ok and tonumber(result) then
+			return tonumber(result)
+		end
+	end
+	return nil
+end
 
-local WBEF, HD, RC = 3, 0, 3
-local pend = {}
-local function FP(e) for _, o in ipairs(e:GetDescendants()) do if o:IsA("ProximityPrompt") then return o end end end
-local function GPP(p, e)
-    if not p or not p.Parent then return nil end
-    if p.Parent:IsA("BasePart") then return p.Parent end
-    if e:IsA("BasePart") then return e end
-    return e:FindFirstChildWhichIsA("BasePart", true)
-end
-local function CL(e, p)
-    if not e or not p then return end
-    for _ = 1, RC do
-        if (not SYS and not AG_TARGET) or K or not e.Parent or not p.Parent then return end
-        local r = RT() local pp = GPP(p, e)
-        if not r or not pp then return end
-        if (r.Position - pp.Position).Magnitude > PR then return end
-        if p.Enabled then p:InputHoldBegin() task.wait(HD) if p.Parent then p:InputHoldEnd() end end
-        task.wait(0.1)
-    end
-end
 task.spawn(function()
-    while task.wait(0.1) do
-        if K then break end
-        if not SYS and not AG_TARGET then continue end
-        local r = RT() if not r then continue end
-        for _, e in ipairs(EF:GetChildren()) do
-            if e.Parent then
-                local p = FP(e)
-                if p then
-                    local pp = GPP(p, e)
-                    if pp and (r.Position - pp.Position).Magnitude <= PR and not pend[e] then
-                        pend[e] = true
-                        task.spawn(function()
-                            task.wait(WBEF)
-                            if (not SYS and not AG_TARGET) or K or not e.Parent or not p.Parent then pend[e] = nil return end
-                            local cr = RT() local cp = GPP(p, e)
-                            if not cr or not cp then pend[e] = nil return end
-                            if (cr.Position - cp.Position).Magnitude <= PR then CL(e, p) end
-                            pend[e] = nil
-                        end)
-                    end
-                end
-            end
-        end
-    end
-end)
-C(EF.ChildRemoved:Connect(function(e) pend[e] = nil end))
-
-local EO = {}
-local function GEP(e)
-    if e:IsA("Model") then return e:GetPivot().Position end
-    if e:IsA("BasePart") then return e.Position end
-    local p = e:FindFirstChildWhichIsA("BasePart", true)
-    return p and p.Position
-end
-local function GKG(e)
-    local A = {"KG","Kg","kg","Weight","weight"}
-    for _, a in ipairs(A) do local v = e:GetAttribute(a) if v ~= nil then return tostring(v).." KG" end end
-    for _, n in ipairs(A) do local v = e:FindFirstChild(n, true) if v and v:IsA("ValueBase") then return tostring(v.Value).." KG" end end
-    return "KG: ?"
-end
-local function SESP(e)
-    local en = normKey(e.Name) if en == "" then return false end
-    for k, v in pairs(AE) do
-        if v then
-            local kn = normKey(k)
-            if kn ~= "" and (en == kn or en:find(kn, 1, true) or kn:find(en, 1, true)) then return true end
-        end
-    end
-    for k in pairs(SE) do
-        local kn = normKey(k)
-        if kn ~= "" and en:find(kn, 1, true) then return true end
-    end
-    return false
-end
-local function RE(e)
-    local d = EO[e] if not d then return end
-    if d.h then d.h:Destroy() end
-    if d.b then d.b:Destroy() end
-    EO[e] = nil
-end
-local function CE(e)
-    if not EE or EO[e] or not SESP(e) then return end
-    local h = Instance.new("Highlight")
-    h.Name = "EggESP" h.FillTransparency = 0.5 h.OutlineTransparency = 0 h.Parent = e
-    local b = Instance.new("BillboardGui")
-    b.Name = "EggESP" b.Size = UDim2.new(0,140,0,48) b.StudsOffset = Vector3.new(0,3,0) b.AlwaysOnTop = true b.Parent = e
-    local nl = Instance.new("TextLabel")
-    nl.Size = UDim2.new(1,0,0.34,0) nl.BackgroundTransparency = 1 nl.Text = e.Name nl.TextColor3 = Color3.new(1,1,1) nl.TextStrokeTransparency = 0 nl.TextScaled = true nl.Font = Enum.Font.GothamBold nl.Parent = b
-    local kl = Instance.new("TextLabel")
-    kl.Size = UDim2.new(1,0,0.33,0) kl.Position = UDim2.new(0,0,0.34,0) kl.BackgroundTransparency = 1 kl.Text = GKG(e) kl.TextColor3 = Color3.new(1,1,1) kl.TextStrokeTransparency = 0 kl.TextScaled = true kl.Font = Enum.Font.Gotham kl.Parent = b
-    local dl = Instance.new("TextLabel")
-    dl.Size = UDim2.new(1,0,0.33,0) dl.Position = UDim2.new(0,0,0.67,0) dl.BackgroundTransparency = 1 dl.Text = "0 studs" dl.TextColor3 = Color3.new(1,1,1) dl.TextStrokeTransparency = 0 dl.TextScaled = true dl.Font = Enum.Font.Gotham dl.Parent = b
-    EO[e] = {h=h, b=b, k=kl, d=dl}
-end
-local function DA() for e in pairs(EO) do RE(e) end end
-local function CA() if not EE then return end for _, e in ipairs(EF:GetChildren()) do CE(e) end end
-local function ReEvalESP()
-    local toRemove = {}
-    for e in pairs(EO) do if not e.Parent or not SESP(e) then toRemove[#toRemove+1] = e end end
-    for _, e in ipairs(toRemove) do RE(e) end
-end
-CA()
-C(EF.ChildAdded:Connect(function(e) if K then return end task.wait(0.1) if SESP(e) then CE(e) end end))
-C(EF.ChildRemoved:Connect(function(e) RE(e) end))
-C(RS.RenderStepped:Connect(function()
-    if K or not EE then return end
-    local c = pl.Character local r = c and c:FindFirstChild("HumanoidRootPart")
-    if not r then return end
-    for e, d in pairs(EO) do
-        if e.Parent then
-            d.k.Text = GKG(e)
-            local p = GEP(e)
-            if p then d.d.Text = string.format("%.0f studs", (r.Position - p).Magnitude) end
-        end
-    end
-end))
-
-------------------------------------------------------------
--- ============= UI (LUNO LIBRARY) MULAI DI SINI =============
-------------------------------------------------------------
-
-local AG = false
-local AGSavedSYS = nil
-local SYS_FLAG = "MacHx_SystemEnabled"
-local AG_FLAG = "MacHx_AutoGiveEnabled"
-
--- Buat Window Luno (CreateWindow otomatis nambah tab MISC & Config bawaan library)
-local UI = LunoLib:CreateWindow({
-    Title = "MacHx",
-    SubTitle = "Ride a Pet v1.5",
-    Discord = "https://discord.gg/machx"
-})
-
-local HomeTab     = UI:CreateTab("Home")
-local FarmTab     = UI:CreateTab("Farm")
-local ESPTab      = UI:CreateTab("ESP")
-local PresetsTab  = UI:CreateTab("Presets")
-local EventsTab   = UI:CreateTab("Events")
-local SettingsTab = UI:CreateTab("Settings")
-
--- ===== HOME =====
-HomeTab:CreateSection("Character Modifications")
-HomeTab:CreateSlider({
-    Title = "WalkSpeed", Min = 16, Max = 250, Default = 16, Suffix = " spd", Flag = "MacHx_WalkSpeed",
-    Callback = function(v) local c = pl.Character local h = c and c:FindFirstChildOfClass("Humanoid") if h then h.WalkSpeed = v end end
-})
-HomeTab:CreateSlider({
-    Title = "JumpPower", Min = 50, Max = 500, Default = 50, Suffix = " pwr", Flag = "MacHx_JumpPower",
-    Callback = function(v) local c = pl.Character local h = c and c:FindFirstChildOfClass("Humanoid") if h then h.UseJumpPower = true; h.JumpPower = v end end
-})
-HomeTab:CreateToggle({
-    Title = "Noclip", Default = noclipEnabled, Flag = "MacHx_Noclip",
-    Callback = function(v) noclipEnabled = v; saveAll(); sys("Noclip " .. (v and "ON" or "OFF")) end
-})
-HomeTab:CreateToggle({
-    Title = "Infinite Jump", Default = infJumpEnabled, Flag = "MacHx_InfJump",
-    Callback = function(v) infJumpEnabled = v; saveAll(); sys("Inf Jump " .. (v and "ON" or "OFF")) end
-})
-HomeTab:CreateToggle({
-    Title = "Anti-AFK", Default = ANTI_AFK, Flag = "MacHx_AntiAFK",
-    Callback = function(v) ANTI_AFK = v; saveAll(); ok("Anti-AFK " .. (v and "ON" or "OFF")) end
-})
-
-HomeTab:CreateSection("Egg Inventory")
-local function cleanEggName(name)
-    local n = tostring(name or "")
-    n = n:gsub("%s+%d+%s*[Kk][Gg]?%s*$", "")
-    return n:gsub("%s+%d+%s*$", ""):gsub("%s+$", "")
-end
-local function countEggs()
-    local counts = {}
-    local containers = {}
-    local bp = pl:FindFirstChildOfClass("Backpack")
-    if bp then table.insert(containers, bp) end
-    if pl.Character then table.insert(containers, pl.Character) end
-    for _, c in ipairs(containers) do
-        for _, item in ipairs(c:GetChildren()) do
-            if item:IsA("Tool") and item.Name:lower():find("egg", 1, true) then
-                local base = cleanEggName(item.Name)
-                counts[base] = (counts[base] or 0) + 1
-            end
-        end
-    end
-    return counts
-end
-local invText = "(belum discan)"
-local function refreshInv()
-    local counts = countEggs()
-    local sorted, total = {}, 0
-    for name, count in pairs(counts) do table.insert(sorted, { name = name, count = count }) total = total + count end
-    table.sort(sorted, function(a, b) if a.count == b.count then return a.name < b.name end return a.count > b.count end)
-    if #sorted == 0 then
-        invText = "(no eggs in inventory)"
-        return
-    end
-    local lines = {}
-    for _, item in ipairs(sorted) do lines[#lines + 1] = item.name .. "  x  " .. item.count end
-    invText = "Total: " .. total .. "\n" .. table.concat(lines, "\n")
-end
-pcall(refreshInv)
-HomeTab:CreateButton({ Title = "Show Inventory", Callback = function() pcall(refreshInv) info(invText) end })
-task.spawn(function()
-    while not K do
-        task.wait(3); if K then break end
-        pcall(refreshInv)
-    end
+	local nextRebirth, nextIndex = 0, 0
+	while running do
+		local now = os.clock()
+		if On("AutoRebirth") and now >= nextRebirth then
+			local cost = rebirthCost()
+			if cost and Util.Cash() >= cost then
+				Util.Fire("Rebirth")
+				nextRebirth = now + 15
+			else
+				nextRebirth = now + 3
+			end
+		end
+		if On("AutoClaimIndex") and now >= nextIndex then
+			Util.Fire("ClaimIndexReward")
+			nextIndex = now + 60
+		end
+		task.wait(1)
+	end
 end)
 
--- ===== FARM =====
-FarmTab:CreateSection("Egg System")
+---------------------------------------------------------------------
+-- UI : FARM TAB
+---------------------------------------------------------------------
+local eggNameChoices = {}
+do
+	local tmp = {}
+	if type(Data.Eggs) == "table" then
+		for name, egg in pairs(Data.Eggs) do
+			if type(egg) == "table" then
+				table.insert(tmp, {
+					Name = name,
+					Rank = RarityRank[tostring(egg.Rarity)] or 0,
+					Luck = tonumber(egg.Luck) or 0,
+				})
+			end
+		end
+	end
+	table.sort(tmp, function(a, b)
+		if a.Rank ~= b.Rank then
+			return a.Rank > b.Rank
+		end
+		return a.Luck > b.Luck
+	end)
+	for _, e in ipairs(tmp) do
+		table.insert(eggNameChoices, e.Name)
+	end
+end
+
+FarmTab:CreateSection("Farm Status", { Box = true })
+local StatusParagraph = FarmTab:CreateParagraph({ Title = "Status", Desc = "Idle" })
+
+do
+	local last = nil
+	local conn = RunService.Heartbeat:Connect(function()
+		if Util.Status ~= last then
+			last = Util.Status
+			pcall(StatusParagraph.SetDesc, StatusParagraph, last)
+		end
+	end)
+	OnCleanup(function()
+		conn:Disconnect()
+	end)
+end
+
+FarmTab:CreateSection("Auto Collect Eggs", { Box = true })
+
 FarmTab:CreateToggle({
-    Title = "System Enabled", Default = SYS, Flag = SYS_FLAG,
-    Callback = function(v)
-        SYS = v
-        if v and AG then
-            AG = false; AGSavedSYS = nil; AG_TARGET = nil
-            if LunoLib.Elements[AG_FLAG] then LunoLib.Elements[AG_FLAG].Set(false) end
-            warn("Auto Give disabled")
-        end
-        saveAll()
-        if v then ok("System ON") else warn("System OFF") end
-    end
-})
-FarmTab:CreateToggle({
-    Title = "Auto Lava Mutation", Default = LM, Flag = "MacHx_AutoLM",
-    Callback = function(v) LM = v; saveAll(); if v then ok("Auto LM ON") else warn("Auto LM OFF") end end
+	Title = "Auto Collect Eggs",
+	Default = false,
+	Flag = "AutoCollectEggs",
+	Callback = function()
+		Farm.Wake()
+	end,
 })
 
-FarmTab:CreateSection("Priority Eggs (1 = volcanic → lowest)")
-local function PLHas(name) local n = normKey(name) if n == "" then return false end for _, k in ipairs(PL) do if normKey(k) == n then return true end end return false end
-local function PLRemove(name) local n = normKey(name) for i = #PL, 1, -1 do if normKey(PL[i]) == n then table.remove(PL, i) end end end
-local function PLAdd(name) local n = normKey(name) if n == "" then return false, 0 end if PLHas(n) then return false, table.find(PL, n) or 0 end table.insert(PL, n) PL = resortList(PL) return true, table.find(PL, n) end
-
-local priorityText = "(none set)"
-local function refreshPriorityDisplay()
-    if #PL == 0 then priorityText = "(none set)" return end
-    local lines = {}
-    for i, k in ipairs(PL) do
-        local tag = (i == 1) and "  <- highest" or ((i == #PL and #PL > 1) and "  <- lowest" or "")
-        lines[#lines + 1] = i .. ". " .. k .. tag
-    end
-    priorityText = table.concat(lines, "\n")
-end
-
-local eggToggleFlags = {}
-local function syncChecklist()
-    for _, k in ipairs(ALL_EGGS) do
-        local flag = eggToggleFlags[k]
-        if flag and LunoLib.Elements[flag] then
-            pcall(function() LunoLib.Elements[flag].Set(PLHas(normKey(k))) end)
-        end
-    end
-end
-
-for _, k in ipairs(ALL_EGGS) do
-    local baseKey = normKey(k)
-    local flag = "MacHx_Prio_" .. baseKey
-    eggToggleFlags[k] = flag
-    FarmTab:CreateToggle({
-        Title = k, Default = PLHas(baseKey), Flag = flag,
-        Callback = function(v)
-            PLRemove(baseKey)
-            if v then table.insert(PL, baseKey) end
-            PL = resortList(PL)
-            saveAll()
-            refreshPriorityDisplay()
-        end
-    })
-end
-pcall(refreshPriorityDisplay)
-FarmTab:CreateButton({ Title = "Show Priority Order", Callback = function() refreshPriorityDisplay() info(priorityText) end })
-
-FarmTab:CreateInput({
-    Title = "Add Custom Priority", Placeholder = "e.g. rainbow",
-    Callback = function(t)
-        local n = normKey(t) if n == "" then return end
-        local added, pos = PLAdd(n)
-        if added then saveAll(); refreshPriorityDisplay(); syncChecklist(); ok(string.format("Added at slot %d: %s", pos, n))
-        else warn("Already at slot " .. pos .. ": " .. n) end
-    end
-})
-FarmTab:CreateInput({
-    Title = "Remove Priority", Placeholder = "type name",
-    Callback = function(t)
-        local n = normKey(t) if n == "" then return end
-        if PLHas(n) then PLRemove(n); PL = resortList(PL); saveAll(); refreshPriorityDisplay(); syncChecklist(); ok("Removed: " .. n)
-        else warn("Not in priority: " .. n) end
-    end
-})
-FarmTab:CreateButton({ Title = "Clear All Priorities", Callback = function() PL = {} saveAll() refreshPriorityDisplay() syncChecklist() warn("Cleared") end })
-FarmTab:CreateButton({
-    Title = "Restore Defaults (volcanic>cherub>solaris>blackhole)",
-    Callback = function() PL = {"volcanic","cherub","solaris","blackhole"} PL = resortList(PL) saveAll() refreshPriorityDisplay(); syncChecklist(); ok("Defaults restored") end
+FarmTab:CreateDropdown({
+	Title = "Min Egg Rarity",
+	Options = RarityChoices,
+	Default = RarityChoices[1],
+	Flag = "MinEggRarity",
+	Callback = function(value)
+		minEggRank = RarityRank[tostring(value)] or 0
+	end,
 })
 
-FarmTab:CreateSection("Farm Speed")
-FarmTab:CreateSlider({ Title = "Tween Speed", Min = 20, Max = 300, Default = SP, Flag = "MacHx_TweenSpeed", Callback = function(v) SP = v; saveAll() end })
-FarmTab:CreateSlider({ Title = "Next Egg Wait", Min = 1, Max = 60, Default = WN, Flag = "MacHx_NextWait", Callback = function(v) WN = v; saveAll() end })
-FarmTab:CreateSlider({ Title = "Top Wait", Min = 1, Max = 60, Default = WT, Flag = "MacHx_TopWait", Callback = function(v) WT = v; saveAll() end })
-FarmTab:CreateSlider({ Title = "Volcano Radius", Min = 3, Max = 50, Default = VR, Flag = "MacHx_VolcanoRadius", Callback = function(v) VR = v; saveAll() end })
+FarmTab:CreateDropdown({
+	Title = "Target Eggs",
+	Options = eggNameChoices,
+	Multi = true,
+	Default = {},
+	Flag = "TargetEggs",
+	Callback = function(value)
+		targetEggs = ToSet(value)
+	end,
+})
 
-FarmTab:CreateSection("Proximity")
+FarmTab:CreateDropdown({
+	Title = "Collect Priority",
+	Options = PriorityChoices,
+	Default = "Highest Rarity",
+	Flag = "CollectPriority",
+	Callback = function(value)
+		collectPriority = tostring(value)
+	end,
+})
+
 FarmTab:CreateSlider({
-    Title = "Proximity Radius", Min = 5, Max = 100, Default = PR, Flag = "MacHx_ProxRadius",
-    Callback = function(v) PR = v; saveAll(); info("Proximity radius: " .. v) end
+	Title = "Tween Speed",
+	Min = 100,
+	Max = 1300,
+	Default = 600,
+	Flag = "TweenSpeed",
+	Callback = function(value)
+		Util.FlySpeed = math.clamp(tonumber(value) or 600, 100, 1300)
+	end,
 })
 
--- ===== FARM → AUTO GIVE =====
-FarmTab:CreateSection("Auto Give")
+-- Manual collect (pengganti panel "Map Eggs" bawaan library lama)
+FarmTab:CreateSection("Manual Egg Collect", { Box = true })
 
-local function getOtherPlayerNames()
-    local names = {}
-    for _, p in ipairs(Players:GetPlayers()) do if p ~= pl then names[#names + 1] = p.Name end end
-    table.sort(names)
-    if #names == 0 then names = {"No Players"} end
-    return names
-end
-local function getFirstTargetName()
-    if type(AG_TARGETS) == "string" then return AG_TARGETS end
-    if type(AG_TARGETS) == "table" then return AG_TARGETS[1] end
-    return nil
+local manualMap = {}
+local manualLabels = {}
+local manualSelected = nil
+
+local function buildEggLabels()
+	manualMap = {}
+	local entries = {}
+	local root = Util.Root()
+	local origin = root and root.Position or Vector3.zero
+
+	for _, cfg in ipairs(ActiveEggs:GetChildren()) do
+		local eggName = cfg:GetAttribute("Egg")
+		local pos = cfg:GetAttribute("Position")
+		local privateTo = cfg:GetAttribute("PrivateTo")
+		if type(eggName) == "string" and typeof(pos) == "Vector3" and (privateTo == nil or privateTo == localPlayer.UserId) then
+			table.insert(entries, {
+				Uid = cfg.Name,
+				Name = eggName,
+				Rarity = Util.EggRarity(eggName),
+				Rank = Util.EggRank(eggName),
+				Luck = Util.EggLuck(eggName) * (tonumber(cfg:GetAttribute("Weight")) or 1),
+				Distance = (pos - origin).Magnitude,
+			})
+		end
+	end
+
+	table.sort(entries, function(a, b)
+		if a.Rank ~= b.Rank then
+			return a.Rank > b.Rank
+		end
+		if a.Luck ~= b.Luck then
+			return a.Luck > b.Luck
+		end
+		return a.Distance < b.Distance
+	end)
+
+	local labels = {}
+	for i, e in ipairs(entries) do
+		if i > 40 then
+			break
+		end
+		local label = string.format("%s | %s | %dm | #%s", e.Name, e.Rarity, math.floor(e.Distance), string.sub(e.Uid, 1, 4))
+		manualMap[label] = e.Uid
+		table.insert(labels, label)
+	end
+
+	if #labels == 0 then
+		labels = { "No Eggs" }
+	end
+	manualLabels = labels
+	return labels
 end
 
-local AGStatusText = "Idle"
-local function updateAGStatus()
-    if AG then
-        AGStatusText = "Giving to: " .. (AG_TARGET and AG_TARGET.Name or "?") .. "\nEggs: " .. table.concat(AG_EGGS, ", ")
-    else
-        AGStatusText = "Target: " .. (getFirstTargetName() or "none")
-    end
-end
-
-local agDropdown
-agDropdown = FarmTab:CreateDropdown({
-    Title = "Target Player",
-    Options = getOtherPlayerNames(),
-    Multi = false,
-    Default = getFirstTargetName(),
-    Flag = "MacHx_TargetPlayer",
-    Callback = function(selected)
-        if type(selected) == "string" and selected ~= "" and selected ~= "No Players" then
-            AG_TARGETS = {selected}
-        else
-            AG_TARGETS = {}
-        end
-        AG_TARGET_IDX = 1
-        if AG then
-            local n = getFirstTargetName()
-            AG_TARGET = n and findPlayerByNameG(n) or nil
-            if AG_TARGET then info("Target set: " .. AG_TARGET.Name) else warn("Target not found: " .. tostring(n)) end
-        else
-            AG_TARGET = nil
-        end
-        updateAGStatus()
-    end
+local ManualDropdown = FarmTab:CreateDropdown({
+	Title = "Map Eggs",
+	Options = buildEggLabels(),
+	Default = manualLabels[1],
+	Flag = "ManualEggSelect",
+	Callback = function(value)
+		manualSelected = value
+	end,
 })
 
-local function refreshPlayerDropdown()
-    if agDropdown and agDropdown.Refresh then
-        pcall(function() agDropdown.Refresh(getOtherPlayerNames()) end)
-    end
-end
-C(Players.PlayerAdded:Connect(function() task.wait(0.5) refreshPlayerDropdown() end))
-C(Players.PlayerRemoving:Connect(function(p)
-    task.wait(0.2)
-    refreshPlayerDropdown()
-    if type(AG_TARGETS) == "table" then
-        for i = #AG_TARGETS, 1, -1 do if AG_TARGETS[i] == p.Name then table.remove(AG_TARGETS, i) end end
-    end
-    if AG and AG_TARGET == p then
-        local n = getFirstTargetName()
-        if n then
-            AG_TARGET_IDX = 1
-            AG_TARGET = findPlayerByNameG(n)
-        else
-            AG = false; AG_TARGET = nil
-            if AGSavedSYS ~= nil then SYS = AGSavedSYS end
-            AGSavedSYS = nil
-            if LunoLib.Elements[AG_FLAG] then pcall(function() LunoLib.Elements[AG_FLAG].Set(false) end) end
-            if LunoLib.Elements[SYS_FLAG] then pcall(function() LunoLib.Elements[SYS_FLAG].Set(SYS) end) end
-            warn("Target left - Auto Give disabled")
-        end
-        updateAGStatus()
-    end
-end))
+FarmTab:CreateButton({
+	Title = "Refresh Egg List",
+	Callback = function()
+		ManualDropdown.Refresh(buildEggLabels())
+		manualSelected = nil
+	end,
+})
+
+FarmTab:CreateButton({
+	Title = "Collect Selected Egg",
+	Callback = function()
+		local label = manualSelected or manualLabels[1]
+		local uid = label and manualMap[label]
+		if not uid then
+			Notify("Manual Collect", "Pilih egg dulu (Refresh Egg List).")
+			return
+		end
+		queueManual(uid)
+		Notify("Manual Collect", "Egg masuk antrian.")
+	end,
+})
+
+FarmTab:CreateButton({
+	Title = "Clear Manual Queue",
+	Callback = function()
+		local copy = table.clone(Farm.Manual)
+		for _, uid in ipairs(copy) do
+			cancelManual(uid)
+		end
+		if Farm.Target and Farm.TargetManual then
+			Farm.Dropped = Farm.Target
+		end
+		Farm.Wake()
+		Notify("Manual Collect", "Antrian dibersihkan.")
+	end,
+})
+
+FarmTab:CreateSection("Auto Plant & Hatch", { Box = true })
 
 FarmTab:CreateToggle({
-    Title = "Auto Give Enabled", Default = false, Flag = AG_FLAG,
-    Callback = function(v)
-        local name = getFirstTargetName()
-        if v and not name then
-            warn("Select a target player first")
-            task.defer(function() if LunoLib.Elements[AG_FLAG] then pcall(function() LunoLib.Elements[AG_FLAG].Set(false) end) end end)
-            return
-        end
-        if v then
-            local target = findPlayerByNameG(name)
-            if not target then
-                warn("Target player not online: " .. tostring(name))
-                task.defer(function() if LunoLib.Elements[AG_FLAG] then pcall(function() LunoLib.Elements[AG_FLAG].Set(false) end) end end)
-                return
-            end
-            AGSavedSYS = SYS
-            SYS = false
-            if LunoLib.Elements[SYS_FLAG] then pcall(function() LunoLib.Elements[SYS_FLAG].Set(false) end) end
-            AG_TARGET_IDX = 1
-            AG_TARGET = target
-            AG = true
-            ok("Auto Give ON - target: " .. target.Name)
-        else
-            AG = false
-            AG_TARGET = nil
-            if AGSavedSYS ~= nil then SYS = AGSavedSYS end
-            AGSavedSYS = nil
-            if LunoLib.Elements[SYS_FLAG] then pcall(function() LunoLib.Elements[SYS_FLAG].Set(SYS) end) end
-            warn("Auto Give OFF")
-        end
-        saveAll()
-        updateAGStatus()
-    end
+	Title = "Auto Plant Eggs",
+	Default = false,
+	Flag = "AutoPlantEggs",
+	Callback = function()
+		plantBackoffUntil = 0
+		Farm.Wake()
+	end,
 })
-FarmTab:CreateButton({ Title = "Show Auto Give Status", Callback = function() updateAGStatus() info(AGStatusText) end })
 
-FarmTab:CreateSection("Eggs to Give (multi-select)")
-
-local function AGEHas(name)
-    local n = normKey(name)
-    if n == "" then return false end
-    for _, k in ipairs(AG_EGGS) do if normKey(k) == n then return true end end
-    return false
-end
-local ageText = "(none set)"
-local function refreshAGEDisplay()
-    if #AG_EGGS == 0 then ageText = "(none set)" return end
-    local lines = {}
-    for i, k in ipairs(AG_EGGS) do
-        local tag = (i == 1) and "  <- highest" or ((i == #AG_EGGS and #AG_EGGS > 1) and "  <- lowest" or "")
-        lines[#lines + 1] = i .. ". " .. k .. tag
-    end
-    ageText = table.concat(lines, "\n")
-end
-pcall(refreshAGEDisplay)
-
-local function getAllEggNamesAG()
-    local names = {}
-    for _, k in ipairs(ALL_EGGS) do names[#names + 1] = k end
-    for _, k in ipairs(AG_EGGS) do
-        local found = false
-        for _, n in ipairs(names) do if normKey(n) == normKey(k) then found = true break end end
-        if not found then names[#names + 1] = k end
-    end
-    table.sort(names)
-    return names
-end
-local function currentAGSelection()
-    local sel = {}
-    for _, n in ipairs(ALL_EGGS) do if AGEHas(n) then sel[#sel + 1] = n end end
-    for _, k in ipairs(AG_EGGS) do
-        local found = false
-        for _, n in ipairs(ALL_EGGS) do if normKey(n) == normKey(k) then found = true break end end
-        if not found then sel[#sel + 1] = k end
-    end
-    return sel
-end
-
-local ageDropdown
-ageDropdown = FarmTab:CreateDropdown({
-    Title = "Select Eggs (multi)",
-    Options = getAllEggNamesAG(),
-    Multi = true,
-    Default = currentAGSelection(),
-    Flag = "MacHx_GiveEggs",
-    Callback = function(selected)
-        local newList = {}
-        if type(selected) == "table" then
-            for _, n in ipairs(selected) do newList[#newList + 1] = normKey(n) end
-        elseif type(selected) == "string" and selected ~= "" then
-            newList = {normKey(selected)}
-        end
-        AG_EGGS = resortList(newList)
-        saveAll()
-        refreshAGEDisplay()
-        ok(string.format("Give list updated (%d eggs)", #AG_EGGS))
-    end
+FarmTab:CreateDropdown({
+	Title = "Plant Min Rarity",
+	Options = RarityChoices,
+	Default = RarityChoices[1],
+	Flag = "PlantMinRarity",
+	Callback = function(value)
+		plantMinRank = RarityRank[tostring(value)] or 0
+	end,
 })
-FarmTab:CreateButton({ Title = "Show Give List", Callback = function() refreshAGEDisplay() info(ageText) end })
-FarmTab:CreateButton({
-    Title = "Refresh Dropdown List",
-    Callback = function()
-        if ageDropdown and ageDropdown.Refresh then pcall(function() ageDropdown.Refresh(getAllEggNamesAG()) end) end
-        ok("Refreshed")
-    end
+
+FarmTab:CreateToggle({
+	Title = "Auto Hatch Eggs",
+	Default = false,
+	Flag = "AutoHatchEggs",
+	Callback = function()
+		Farm.Wake()
+	end,
 })
+
+FarmTab:CreateSection("Auto Pets", { Box = true })
+
+FarmTab:CreateToggle({
+	Title = "Auto Place Best Pets",
+	Default = false,
+	Flag = "AutoPlaceBestPets",
+	Callback = function()
+		Farm.Wake()
+	end,
+})
+
+FarmTab:CreateToggle({
+	Title = "Swap Weaker Pets",
+	Default = false,
+	Flag = "SwapWeakerPets",
+	Callback = function()
+		Farm.Wake()
+	end,
+})
+
+FarmTab:CreateToggle({
+	Title = "Auto Feed Pets",
+	Default = false,
+	Flag = "AutoFeedPets",
+	Callback = function()
+		table.clear(feedCooldown)
+		Farm.Wake()
+	end,
+})
+
+FarmTab:CreateDropdown({
+	Title = "Foods To Use",
+	Options = #foodChoices > 0 and foodChoices or { "None" },
+	Multi = true,
+	Default = {},
+	Flag = "FoodsToUse",
+	Callback = function(value)
+		foodSelected = ToSet(value)
+	end,
+})
+
+FarmTab:CreateSection("Auto Shop", { Box = true })
+
+FarmTab:CreateToggle({
+	Title = "Auto Buy Food",
+	Default = false,
+	Flag = "AutoBuyFood",
+	Callback = function() end,
+})
+
+FarmTab:CreateDropdown({
+	Title = "Food To Buy",
+	Options = #shopNames("Food") > 0 and shopNames("Food") or { "None" },
+	Multi = true,
+	Default = {},
+	Flag = "FoodToBuy",
+	Callback = function(value)
+		ShopSelected.Food = ToSet(value)
+	end,
+})
+
+FarmTab:CreateToggle({
+	Title = "Auto Buy Radars",
+	Default = false,
+	Flag = "AutoBuyRadars",
+	Callback = function() end,
+})
+
+FarmTab:CreateDropdown({
+	Title = "Radars To Buy",
+	Options = #shopNames("Gears") > 0 and shopNames("Gears") or { "None" },
+	Multi = true,
+	Default = {},
+	Flag = "RadarsToBuy",
+	Callback = function(value)
+		ShopSelected.Gears = ToSet(value)
+	end,
+})
+
 FarmTab:CreateInput({
-    Title = "Add Custom Egg (partial match)", Placeholder = "e.g. rainbow",
-    Callback = function(t)
-        local n = normKey(t) if n == "" then return end
-        if AGEHas(n) then warn("Already added: " .. n); return end
-        table.insert(AG_EGGS, n)
-        AG_EGGS = resortList(AG_EGGS)
-        saveAll()
-        refreshAGEDisplay()
-        if ageDropdown and ageDropdown.Refresh then pcall(function() ageDropdown.Refresh(getAllEggNamesAG()) end) end
-        ok("Added: " .. n)
-    end
-})
-FarmTab:CreateButton({
-    Title = "Clear Give List",
-    Callback = function()
-        AG_EGGS = {}
-        saveAll()
-        refreshAGEDisplay()
-        if ageDropdown and ageDropdown.Refresh then pcall(function() ageDropdown.Refresh(getAllEggNamesAG()) end) end
-        warn("Cleared")
-    end
-})
-FarmTab:CreateButton({
-    Title = "Restore Defaults (volcanic>cherub>solaris>blackhole)",
-    Callback = function()
-        AG_EGGS = {"volcanic","cherub","solaris","blackhole"}
-        AG_EGGS = resortList(AG_EGGS)
-        saveAll()
-        refreshAGEDisplay()
-        if ageDropdown and ageDropdown.Refresh then pcall(function() ageDropdown.Refresh(getAllEggNamesAG()) end) end
-        ok("Defaults restored")
-    end
-})
-FarmTab:CreateButton({ Title = "Refresh Players List", Callback = function() refreshPlayerDropdown() ok("Refreshed") end })
-
-updateAGStatus()
-
--- ===== ESP =====
-ESPTab:CreateSection("ESP")
-ESPTab:CreateToggle({
-    Title = "ESP Enabled", Default = EE, Flag = "MacHx_ESPEnabled",
-    Callback = function(v) EE = v if v then CA() else DA() end saveAll() if v then ok("ESP ON") else warn("ESP OFF") end end
+	Title = "Keep Cash",
+	Placeholder = "0",
+	Callback = function(text)
+		keepCash = math.max(0, tonumber(text) or 0)
+	end,
 })
 
-ESPTab:CreateSection("Auto ESP Eggs")
-for _, k in ipairs({"cherub egg","blackhole egg","galaxy egg","volcanic egg","solaris egg"}) do
-    local nk = normKey(k)
-    ESPTab:CreateToggle({
-        Title = k:upper(), Default = AE[nk] ~= false, Flag = "MacHx_AutoESP_" .. nk,
-        Callback = function(v) AE[nk] = v saveAll() if v then CA() else ReEvalESP() end end
-    })
+FarmTab:CreateSection("Auto Progress", { Box = true })
+
+FarmTab:CreateToggle({
+	Title = "Auto Rebirth",
+	Default = false,
+	Flag = "AutoRebirth",
+	Callback = function() end,
+})
+
+FarmTab:CreateToggle({
+	Title = "Auto Claim Index Reward",
+	Default = false,
+	Flag = "AutoClaimIndex",
+	Callback = function() end,
+})
+
+---------------------------------------------------------------------
+-- UI : PLAYER TAB
+---------------------------------------------------------------------
+local boostSpeed = 60
+
+PlayerTab:CreateSection("Movement", { Box = true })
+
+do
+	local conn = RunService.Heartbeat:Connect(function()
+		if not On("SpeedBoost") or Farm.Busy then
+			return
+		end
+		local hum = Util.Humanoid()
+		local root = Util.Root()
+		if not hum or not root or hum.Sit then
+			return
+		end
+		local dir = hum.MoveDirection
+		local flat = Vector3.new(dir.X, 0, dir.Z)
+		if flat.Magnitude < 0.05 then
+			return
+		end
+		root.AssemblyLinearVelocity = Vector3.new(0, root.AssemblyLinearVelocity.Y, 0) + flat.Unit * boostSpeed
+	end)
+	OnCleanup(function()
+		conn:Disconnect()
+	end)
 end
 
-ESPTab:CreateSection("Manual ESP")
-local manualText = "(empty)"
-local function refreshManualDisplay()
-    local list = {}
-    for k in pairs(SE) do list[#list + 1] = k end
-    table.sort(list)
-    manualText = (#list == 0) and "(empty)" or table.concat(list, "\n")
+PlayerTab:CreateToggle({
+	Title = "Speed Boost",
+	Default = false,
+	Flag = "SpeedBoost",
+	Callback = function() end,
+})
+
+PlayerTab:CreateSlider({
+	Title = "Boost Speed",
+	Min = 16,
+	Max = 1300,
+	Default = 60,
+	Flag = "BoostSpeed",
+	Callback = function(value)
+		boostSpeed = math.clamp(tonumber(value) or 60, 16, 1300)
+	end,
+})
+
+do
+	local conn = UserInputService.JumpRequest:Connect(function()
+		if not On("InfiniteJump") then
+			return
+		end
+		local hum = Util.Humanoid()
+		if hum then
+			pcall(function()
+				hum:ChangeState(Enum.HumanoidStateType.Jumping)
+			end)
+		end
+	end)
+	OnCleanup(function()
+		conn:Disconnect()
+	end)
 end
-pcall(refreshManualDisplay)
 
-local function getAllEggNames()
-    local names = {}
-    for _, k in ipairs(ALL_EGGS) do names[#names + 1] = k end
-    for k in pairs(SE) do
-        local found = false
-        for _, n in ipairs(names) do if normKey(n) == normKey(k) then found = true break end end
-        if not found then names[#names + 1] = k end
-    end
-    table.sort(names)
-    return names
+PlayerTab:CreateToggle({
+	Title = "Infinite Jump",
+	Default = false,
+	Flag = "InfiniteJump",
+	Callback = function() end,
+})
+
+do
+	local active = false
+	local conn = RunService.Stepped:Connect(function()
+		if On("Noclip") then
+			active = true
+			Util.SetNoclip(true)
+		elseif active then
+			active = false
+			if not Farm.Busy then
+				Util.SetNoclip(false)
+			end
+		end
+	end)
+	OnCleanup(function()
+		conn:Disconnect()
+	end)
 end
-local function currentSelection()
-    local sel = {}
-    for _, n in ipairs(ALL_EGGS) do if SE[normKey(n)] then sel[#sel + 1] = n end end
-    for k in pairs(SE) do
-        local found = false
-        for _, n in ipairs(ALL_EGGS) do if normKey(n) == normKey(k) then found = true break end end
-        if not found then sel[#sel + 1] = k end
-    end
-    return sel
+
+PlayerTab:CreateToggle({
+	Title = "Noclip",
+	Default = false,
+	Flag = "Noclip",
+	Callback = function() end,
+})
+
+do
+	local original = {}
+	local conns = {}
+
+	local function apply(prompt)
+		if not prompt:IsA("ProximityPrompt") then
+			return
+		end
+		if original[prompt] == nil then
+			original[prompt] = prompt.HoldDuration
+		end
+		if prompt.HoldDuration ~= 0 then
+			prompt.HoldDuration = 0
+		end
+	end
+
+	local function stop()
+		for _, c in ipairs(conns) do
+			c:Disconnect()
+		end
+		table.clear(conns)
+		for prompt, value in pairs(original) do
+			if prompt.Parent then
+				pcall(function()
+					prompt.HoldDuration = value
+				end)
+			end
+		end
+		table.clear(original)
+	end
+
+	local function start()
+		stop()
+		for _, d in ipairs(workspace:GetDescendants()) do
+			if d:IsA("ProximityPrompt") then
+				apply(d)
+			end
+		end
+		table.insert(conns, workspace.DescendantAdded:Connect(function(d)
+			if d:IsA("ProximityPrompt") then
+				task.defer(apply, d)
+			end
+		end))
+		table.insert(conns, ProximityPromptService.PromptShown:Connect(apply))
+	end
+
+	OnCleanup(stop)
+
+	PlayerTab:CreateToggle({
+		Title = "Instant Pickup",
+		Default = false,
+		Flag = "InstantPickup",
+		Callback = function(state)
+			if state then
+				start()
+			else
+				stop()
+			end
+		end,
+	})
 end
 
-local manualDropdown = ESPTab:CreateDropdown({
-    Title = "Select Eggs (multi)", Options = getAllEggNames(), Multi = true, Default = currentSelection(), Flag = "MacHx_ManualESP",
-    Callback = function(selected)
-        local newSE = {}
-        if type(selected) == "table" then for _, n in ipairs(selected) do newSE[normKey(n)] = true end
-        elseif type(selected) == "string" and selected ~= "" then newSE[normKey(selected)] = true end
-        SE = newSE
-        saveAll(); refreshManualDisplay(); ReEvalESP(); CA()
-        local n = 0 for _ in pairs(SE) do n = n + 1 end
-        ok(string.format("Manual ESP updated (%d)", n))
-    end
-})
-ESPTab:CreateButton({ Title = "Show Manual List", Callback = function() refreshManualDisplay() info(manualText) end })
-ESPTab:CreateButton({
-    Title = "Refresh Dropdown List",
-    Callback = function()
-        if manualDropdown and manualDropdown.Refresh then pcall(function() manualDropdown.Refresh(getAllEggNames()) end) end
-        ok("Refreshed")
-    end
-})
-ESPTab:CreateInput({
-    Title = "Add Custom Egg (partial)", Placeholder = "e.g. rainbow",
-    Callback = function(t)
-        if not t or t == "" then return end
-        local key = normKey(t) if key == "" then return end
-        if SE[key] then warn("Already added: " .. key); return end
-        SE[key] = true
-        saveAll(); refreshManualDisplay()
-        if manualDropdown and manualDropdown.Refresh then pcall(function() manualDropdown.Refresh(getAllEggNames()) end) end
-        CA()
-        ok("Added: " .. key)
-    end
-})
-ESPTab:CreateButton({
-    Title = "Clear Manual Eggs",
-    Callback = function()
-        for k in pairs(SE) do SE[k] = nil end
-        saveAll(); ReEvalESP(); refreshManualDisplay()
-        if manualDropdown and manualDropdown.Refresh then pcall(function() manualDropdown.Refresh(getAllEggNames()) end) end
-        warn("Cleared")
-    end
+PlayerTab:CreateSection("ESP", { Box = true })
+
+do
+	local font = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.ExtraBold, Enum.FontStyle.Normal)
+	local espMinRank = 0
+	local folder = nil
+	local entries = {}
+	local conns = {}
+
+	local function styleLabel(label, height)
+		label.BackgroundTransparency = 1
+		label.FontFace = font
+		label.TextScaled = true
+		label.TextStrokeTransparency = 1
+		label.TextColor3 = Color3.fromRGB(255, 255, 255)
+		label.Size = UDim2.new(1, 0, 0, height)
+		local stroke = Instance.new("UIStroke")
+		stroke.Name = RandName()
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+		stroke.LineJoinMode = Enum.LineJoinMode.Round
+		stroke.Color = Color3.fromRGB(0, 0, 0)
+		stroke.Thickness = 1.8
+		stroke.Transparency = 0.05
+		stroke.Parent = label
+	end
+
+	local function removeEntry(cfg)
+		local e = entries[cfg]
+		if e then
+			entries[cfg] = nil
+			pcall(function()
+				e.Gui:Destroy()
+			end)
+		end
+	end
+
+	local function addEntry(cfg)
+		if entries[cfg] or not folder then
+			return
+		end
+		local eggName = cfg:GetAttribute("Egg")
+		local pos = cfg:GetAttribute("Position")
+		if type(eggName) ~= "string" or typeof(pos) ~= "Vector3" then
+			return
+		end
+		local privateTo = cfg:GetAttribute("PrivateTo")
+		if privateTo ~= nil and privateTo ~= localPlayer.UserId then
+			return
+		end
+		if Util.EggRank(eggName) < espMinRank then
+			return
+		end
+
+		local rarity = Util.EggRarity(eggName)
+		local gui = Instance.new("BillboardGui")
+		gui.Name = RandName()
+		gui.AlwaysOnTop = true
+		gui.LightInfluence = 0
+		gui.Size = UDim2.fromOffset(170, 46)
+		gui.Adornee = workspace.Terrain
+		gui.StudsOffsetWorldSpace = pos + Vector3.new(0, 4, 0)
+		gui.MaxDistance = 100000
+
+		local frame = Instance.new("Frame")
+		frame.Name = RandName()
+		frame.BackgroundTransparency = 1
+		frame.Size = UDim2.fromScale(1, 1)
+		frame.Parent = gui
+
+		local layout = Instance.new("UIListLayout")
+		layout.Name = RandName()
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		layout.Parent = frame
+
+		local title = Instance.new("TextLabel")
+		title.Name = RandName()
+		title.LayoutOrder = 1
+		styleLabel(title, 24)
+		title.Text = eggName
+		title.TextColor3 = RarityColors[rarity] or Color3.fromRGB(255, 255, 255)
+		title.Parent = frame
+
+		local info = Instance.new("TextLabel")
+		info.Name = RandName()
+		info.LayoutOrder = 2
+		styleLabel(info, 18)
+		info.TextColor3 = Color3.fromRGB(230, 232, 240)
+		info.Parent = frame
+
+		gui.Parent = folder
+		entries[cfg] = {
+			Gui = gui,
+			Info = info,
+			Rarity = rarity,
+			Position = pos,
+			Weight = tonumber(cfg:GetAttribute("Weight")) or 1,
+		}
+	end
+
+	local function stopESP()
+		for _, c in ipairs(conns) do
+			c:Disconnect()
+		end
+		table.clear(conns)
+		for cfg in pairs(entries) do
+			removeEntry(cfg)
+		end
+		if folder then
+			pcall(function()
+				folder:Destroy()
+			end)
+			folder = nil
+		end
+	end
+
+	local function startESP()
+		stopESP()
+		folder = Instance.new("Folder")
+		folder.Name = RandName()
+		folder.Parent = GuiParent
+
+		local children = ActiveEggs:GetChildren()
+		task.spawn(function()
+			local i = 1
+			while folder and i <= #children do
+				local budget = os.clock() + 0.004
+				while i <= #children and os.clock() < budget do
+					addEntry(children[i])
+					i += 1
+				end
+				RunService.Heartbeat:Wait()
+			end
+		end)
+
+		table.insert(conns, ActiveEggs.ChildAdded:Connect(function(child)
+			task.defer(addEntry, child)
+		end))
+		table.insert(conns, ActiveEggs.ChildRemoved:Connect(removeEntry))
+
+		local acc = 0
+		table.insert(conns, RunService.Heartbeat:Connect(function(dt)
+			acc += dt
+			if acc < 0.5 then
+				return
+			end
+			acc = 0
+			local root = Util.Root()
+			if not root then
+				return
+			end
+			for _, e in pairs(entries) do
+				e.Info.Text = string.format("%s  %.2fkg  %dm", e.Rarity, e.Weight, math.floor((e.Position - root.Position).Magnitude))
+			end
+		end))
+	end
+
+	OnCleanup(stopESP)
+
+	PlayerTab:CreateToggle({
+		Title = "ESP Eggs",
+		Default = false,
+		Flag = "ESPEggs",
+		Callback = function(state)
+			if state then
+				startESP()
+			else
+				stopESP()
+			end
+		end,
+	})
+
+	PlayerTab:CreateDropdown({
+		Title = "ESP Min Rarity",
+		Options = RarityChoices,
+		Default = RarityChoices[1],
+		Flag = "ESPMinRarity",
+		Callback = function(value)
+			espMinRank = RarityRank[tostring(value)] or 0
+			if On("ESPEggs") then
+				startESP()
+			end
+		end,
+	})
+end
+
+---------------------------------------------------------------------
+-- UI : SERVER TAB
+---------------------------------------------------------------------
+ServerTab:CreateSection("Server", { Box = true })
+
+local function findQueueOnTeleport()
+	if type(queue_on_teleport) == "function" then
+		return queue_on_teleport
+	end
+	if type(queueonteleport) == "function" then
+		return queueonteleport
+	end
+	if type(syn) == "table" and type(syn.queue_on_teleport) == "function" then
+		return syn.queue_on_teleport
+	end
+	if type(fluxus) == "table" and type(fluxus.queue_on_teleport) == "function" then
+		return fluxus.queue_on_teleport
+	end
+	return nil
+end
+
+local function setAutoLoad(enabled)
+	pcall(function()
+		TeleportService:SetTeleportSetting("__RossiAutoLoadEnabled", enabled)
+	end)
+	if not enabled then
+		return true
+	end
+	if SCRIPT_URL == "" then
+		return false
+	end
+	local queue = findQueueOnTeleport()
+	if not queue then
+		return false
+	end
+	if rawget(_G, "__RossiAutoLoadQueued") ~= true then
+		local source = string.format([[
+local TeleportService = game:GetService("TeleportService")
+local enabled = true
+pcall(function()
+	enabled = TeleportService:GetTeleportSetting("__RossiAutoLoadEnabled") == true
+end)
+if enabled then
+	local ok, src = pcall(game.HttpGet, game, %q)
+	if ok and type(src) == "string" then
+		local chunk = loadstring(src)
+		if chunk then
+			chunk()
+		end
+	end
+end
+]], SCRIPT_URL)
+		if not pcall(queue, source) then
+			return false
+		end
+		_G.__RossiAutoLoadQueued = true
+	end
+	return true
+end
+
+local function autoLoadBeforeTeleport()
+	if On("AutoLoadScript") then
+		setAutoLoad(true)
+	end
+end
+
+ServerTab:CreateToggle({
+	Title = "Auto Load Script",
+	Default = SCRIPT_URL ~= "",
+	Flag = "AutoLoadScript",
+	Callback = function(state)
+		local enabled = state == true
+		if not setAutoLoad(enabled) and enabled then
+			task.defer(function()
+				setAutoLoad(false)
+				SetFlag("AutoLoadScript", false)
+				if SCRIPT_URL == "" then
+					Notify("Auto Load", "Isi SCRIPT_URL di bagian atas script dulu.")
+				else
+					Notify("Auto Load", "Executor tidak support queue_on_teleport.")
+				end
+			end)
+		end
+	end,
 })
 
--- ===== PRESETS / EVENTS (Coming Soon) =====
-PresetsTab:CreateSection("Presets")
-PresetsTab:CreateButton({ Title = "Coming Soon", Callback = function() info("Save/load setup - coming soon") end })
+do
+	local hopMode = "Least Players"
+	local HOP_WAIT = 10
+	local CACHE_TTL = 60
+	local pendingId = nil
+	local failedIds = {}
+	local denied = false
+	local hopRunning = false
+	local hopToken = 0
+	local cache, cacheMode, cacheAt = nil, "", 0
 
-EventsTab:CreateSection("Events")
-EventsTab:CreateButton({ Title = "Coming Soon", Callback = function() info("Auto-join events - coming soon") end })
+	local teleportLockUntil = 0
+	local jobIdText = ""
 
--- ===== SETTINGS =====
-SettingsTab:CreateSection("Notifications")
-SettingsTab:CreateToggle({
-    Title = "Hide All Notifications", Default = HIDE_NOTIF, Flag = "MacHx_HideNotif",
-    Callback = function(v) HIDE_NOTIF = v saveAll() if not v then ok("Notifications ON") end end
-})
-SettingsTab:CreateButton({
-    Title = "Test Notifications",
-    Callback = function() info("Info") task.wait(0.3) ok("Success") task.wait(0.3) warn("Warning") task.wait(0.3) err("Error") end
-})
+	local function markFailed(id)
+		pendingId = nil
+		if id then
+			failedIds[id] = true
+		end
+	end
 
-SettingsTab:CreateSection("Input")
-SettingsTab:CreateButton({
-    Title = "Show Toggle Key Info",
-    Callback = function() sys("UI Toggle Key: RightControl / Insert (fixed by library)") end
-})
+	local function teleportBusy()
+		return os.clock() < teleportLockUntil
+	end
 
-SettingsTab:CreateSection("Save File")
-SettingsTab:CreateButton({ Title = "Save Now (File: " .. SAVE .. ")", Callback = function() saveAll() ok("Saved") end })
-SettingsTab:CreateButton({
-    Title = "Reset All Settings",
-    Callback = function()
-        SYS = true; LM = true; EE = true
-        SP = 80; WN = 15; WT = 13; VR = 10; PR = 30
-        AE = {["cherub"]=true,["blackhole"]=true,["galaxy"]=true,["volcanic"]=true,["solaris"]=true}
-        SE = {}; PL = {"volcanic","cherub","solaris","blackhole"}
-        AG_EGGS = {"volcanic","cherub","solaris","blackhole"}
-        noclipEnabled = false; infJumpEnabled = false
-        ANTI_AFK = true; HIDE_NOTIF = false
-        saveAll()
-        pcall(function() refreshPriorityDisplay(); syncChecklist() end)
-        pcall(function() refreshManualDisplay() end)
-        pcall(function() refreshAGEDisplay() end)
-        pcall(function() DA(); CA() end)
-        warn("Settings reset")
-    end
-})
+	local function setLock(state)
+		teleportLockUntil = state and os.clock() + 8 or 0
+	end
 
-SettingsTab:CreateSection("Danger Zone")
-SettingsTab:CreateButton({
-    Title = "Destroy MacHx",
-    Callback = function()
-        if K then return end
-        K = true; SYS = false; LM = false; EE = false; AG = false; AG_TARGET = nil
-        for _, c in ipairs(CN) do pcall(function() c:Disconnect() end) end
-        CN = {}
-        for e in pairs(EO) do pcall(function() RE(e) end) end
-        EO = {}
-        pcall(function() for _, egg in ipairs(EF:GetDescendants()) do if egg.Name == "EggESP" then pcall(function() egg:Destroy() end) end end end)
-        pcall(function() NotifGui:Destroy() end)
-        if getgenv().LunoUI_Cleanup then pcall(getgenv().LunoUI_Cleanup) end
-    end
-})
-SettingsTab:CreateButton({
-    Title = "Unload UI Only",
-    Callback = function() if getgenv().LunoUI_Cleanup then pcall(getgenv().LunoUI_Cleanup) end end
-})
+	do
+		local conn
+		local ok = pcall(function()
+			conn = TeleportService.TeleportInitFailed:Connect(function(_, result, message)
+				if pendingId then
+					markFailed(pendingId)
+					denied = true
+					if not hopRunning then
+						Notify("Server Hop Failed", tostring(message ~= "" and message or result))
+					end
+				end
+				if teleportBusy() then
+					setLock(false)
+					Notify("Teleport Failed", tostring(message ~= "" and message or result))
+				end
+			end)
+		end)
+		if ok and conn then
+			OnCleanup(function()
+				conn:Disconnect()
+			end)
+		end
+	end
 
-sys("MacHx loaded (Luno UI) - Toggle key: RightControl / Insert")
+	local function fetchServers(mode)
+		local currentJob = tostring(game.JobId or "")
+		local list = {}
+		local random = mode == "Random"
+		local order = mode == "Least Players" and "Asc" or "Desc"
+		local pages = random and 3 or 6
+		local cursor = nil
+
+		for _ = 1, pages do
+			local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=%s&excludeFullGames=true&limit=100", game.PlaceId, order)
+			if cursor and cursor ~= "" then
+				url ..= "&cursor=" .. HttpService:UrlEncode(cursor)
+			end
+
+			local ok, result = pcall(function()
+				return HttpService:JSONDecode(game:HttpGet(url))
+			end)
+			if not ok or type(result) ~= "table" then
+				return list, false
+			end
+
+			for _, s in ipairs(result.data or {}) do
+				local id = tostring(s.id or "")
+				local playing = tonumber(s.playing) or math.huge
+				local maxPlayers = tonumber(s.maxPlayers) or 0
+				if id ~= "" and id ~= currentJob and playing < maxPlayers then
+					list[#list + 1] = { Id = id, Playing = playing, Room = maxPlayers - playing }
+				end
+			end
+
+			if #list > 0 and not random then
+				break
+			end
+			cursor = result.nextPageCursor
+			if not cursor or cursor == "" then
+				break
+			end
+		end
+
+		return list, true
+	end
+
+	local function serverHop(mode)
+		local servers
+		if cache and cacheMode == mode and os.clock() - cacheAt < CACHE_TTL then
+			servers = cache
+		else
+			local ok
+			servers, ok = fetchServers(mode)
+			if not ok then
+				return "fetch"
+			end
+			cache, cacheMode, cacheAt = servers, mode, os.clock()
+		end
+
+		local function withRoom(minRoom)
+			local out = {}
+			for _, s in ipairs(servers) do
+				if not failedIds[s.Id] and s.Room >= minRoom then
+					out[#out + 1] = s
+				end
+			end
+			return out
+		end
+
+		local candidates = withRoom(2)
+		if #candidates == 0 then
+			candidates = withRoom(1)
+		end
+		if #candidates == 0 and next(failedIds) ~= nil then
+			table.clear(failedIds)
+			candidates = withRoom(1)
+		end
+		if #candidates == 0 then
+			markFailed(nil)
+			cache = nil
+			return "empty"
+		end
+
+		local id
+		if mode == "Random" then
+			id = candidates[math.random(1, #candidates)].Id
+		else
+			table.sort(candidates, function(a, b)
+				if mode == "Least Players" then
+					return a.Playing < b.Playing
+				end
+				return a.Playing > b.Playing
+			end)
+			id = candidates[1].Id
+		end
+
+		denied = false
+		pendingId = id
+		pcall(autoLoadBeforeTeleport)
+
+		if not pcall(function()
+			TeleportService:TeleportToPlaceInstance(game.PlaceId, id, localPlayer)
+		end) then
+			markFailed(id)
+			return "failed"
+		end
+
+		local untilT = os.clock() + HOP_WAIT
+		while os.clock() < untilT do
+			if denied then
+				return "denied"
+			end
+			task.wait(0.25)
+		end
+		return "waiting"
+	end
+
+	ServerTab:CreateDropdown({
+		Title = "Server Hop Mode",
+		Options = { "Most Players", "Random", "Least Players" },
+		Default = "Least Players",
+		Flag = "ServerHopMode",
+		Callback = function(value)
+			hopMode = tostring(value or "Least Players")
+		end,
+	})
+
+	ServerTab:CreateButton({
+		Title = "Server Hop",
+		Callback = function()
+			hopToken += 1
+			local mine = hopToken
+			task.spawn(function()
+				hopRunning = true
+				local tries = 0
+				while mine == hopToken and running do
+					tries += 1
+					local result = serverHop(hopMode)
+					if result == "waiting" or mine ~= hopToken then
+						break
+					end
+					if result == "empty" then
+						cache = nil
+						table.clear(failedIds)
+					end
+					if tries % 10 == 0 then
+						Notify("Server Hop", string.format("Semua server penuh, %d percobaan.", tries))
+					end
+					task.wait(result == "fetch" and 1 or 0.1)
+				end
+				if mine == hopToken then
+					hopRunning = false
+				end
+			end)
+		end,
+	})
+
+	local function cleanJobId(text)
+		local trimmed = tostring(text or ""):match("^%s*(.-)%s*$")
+		return trimmed:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") or trimmed
+	end
+
+	ServerTab:CreateInput({
+		Title = "Job ID",
+		Placeholder = "Paste Job ID...",
+		Callback = function(text)
+			jobIdText = cleanJobId(text)
+		end,
+	})
+
+	ServerTab:CreateButton({
+		Title = "Join Job ID",
+		Callback = function()
+			if teleportBusy() then
+				Notify("Join Job ID", "Teleport sedang berjalan, coba lagi sebentar.")
+				return
+			end
+			local id = jobIdText
+			if id == "" then
+				local ok, clip = pcall(function()
+					local reader = getclipboard or readclipboard or getrbxclipboard
+					return type(reader) == "function" and reader() or nil
+				end)
+				if ok and type(clip) == "string" then
+					id = cleanJobId(clip)
+				end
+			end
+			if id == "" then
+				Notify("Join Job ID", "Paste Job ID yang valid dulu.")
+				return
+			end
+			setLock(true)
+			pcall(autoLoadBeforeTeleport)
+			if not pcall(function()
+				TeleportService:TeleportToPlaceInstance(game.PlaceId, id, localPlayer)
+			end) then
+				setLock(false)
+				Notify("Join Job ID", "Roblox tidak bisa join server itu.")
+			end
+		end,
+	})
+
+	ServerTab:CreateButton({
+		Title = "Copy Current Job ID",
+		Callback = function()
+			local id = tostring(game.JobId or "")
+			local copier = setclipboard or toclipboard
+			local ok = type(copier) == "function" and pcall(copier, id) or false
+			Notify(ok and "Job ID Copied" or "Job ID", id)
+		end,
+	})
+
+	ServerTab:CreateButton({
+		Title = "Rejoin Server",
+		Callback = function()
+			if teleportBusy() then
+				Notify("Rejoin", "Teleport sedang berjalan, coba lagi sebentar.")
+				return
+			end
+			setLock(true)
+			pcall(autoLoadBeforeTeleport)
+			if not pcall(function()
+				if game.JobId ~= "" then
+					TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, localPlayer)
+				else
+					TeleportService:Teleport(game.PlaceId, localPlayer)
+				end
+			end) then
+				setLock(false)
+				Notify("Rejoin", "Roblox tidak bisa rejoin server.")
+			end
+		end,
+	})
+end
+
+---------------------------------------------------------------------
+-- UI : UTILITY TAB
+---------------------------------------------------------------------
+UtilityTab:CreateSection("Performance", { Box = true })
+
+do
+	local warned = false
+	UtilityTab:CreateSlider({
+		Title = "FPS Cap",
+		Min = 30,
+		Max = 1000,
+		Default = 240,
+		Suffix = " FPS",
+		Flag = "FPSCap",
+		Callback = function(value)
+			local cap = math.clamp(math.floor(tonumber(value) or 240), 30, 1000)
+			if type(setfpscap) == "function" and pcall(setfpscap, cap) then
+				warned = false
+				return
+			end
+			if not warned then
+				warned = true
+				Notify("FPS Cap", "Executor tidak support setfpscap.")
+			end
+		end,
+	})
+end
+
+-- Optimizer (bisa dikembalikan lagi saat dimatikan)
+do
+	local BUDGET = 0.003
+	local active = false
+	local token = 0
+	local thread = nil
+	local heartbeatConn = nil
+	local settingRestore = {}
+	local original = setmetatable({}, { __mode = "k" })
+	local pending = {}
+	local conns = {}
+
+	local function pushSetting(getter, setter, value)
+		local ok, old = pcall(getter)
+		if not ok then
+			return
+		end
+		settingRestore[#settingRestore + 1] = { Setter = setter, Value = old }
+		pcall(setter, value)
+	end
+
+	local function setProp(inst, prop, value)
+		local saved = original[inst]
+		if not saved then
+			saved = {}
+			original[inst] = saved
+		end
+		if saved[prop] == nil then
+			local ok, old = pcall(function()
+				return inst[prop]
+			end)
+			if not ok then
+				return
+			end
+			saved[prop] = { Value = old }
+		end
+		pcall(function()
+			inst[prop] = value
+		end)
+	end
+
+	local function optimize(inst)
+		if not active or not inst.Parent then
+			return
+		end
+		if inst:IsA("ParticleEmitter") then
+			setProp(inst, "Enabled", false)
+			setProp(inst, "Rate", 0)
+		elseif inst:IsA("Trail") or inst:IsA("Beam") then
+			setProp(inst, "Enabled", false)
+		elseif inst:IsA("PointLight") or inst:IsA("SpotLight") or inst:IsA("SurfaceLight") then
+			setProp(inst, "Enabled", false)
+			setProp(inst, "Brightness", 0)
+		elseif inst:IsA("Fire") or inst:IsA("Smoke") or inst:IsA("Sparkles") then
+			setProp(inst, "Enabled", false)
+		elseif inst:IsA("Explosion") then
+			setProp(inst, "Visible", false)
+		elseif inst:IsA("SpecialMesh") then
+			setProp(inst, "TextureId", "")
+		elseif inst:IsA("Decal") or inst:IsA("Texture") then
+			if not (inst.Name == "face" and inst.Parent and inst.Parent.Name == "Head") then
+				setProp(inst, "Transparency", 1)
+			end
+		elseif inst:IsA("MeshPart") then
+			setProp(inst, "RenderFidelity", Enum.RenderFidelity.Performance)
+			setProp(inst, "TextureID", "")
+			setProp(inst, "CastShadow", false)
+			setProp(inst, "Reflectance", 0)
+			setProp(inst, "Material", Enum.Material.SmoothPlastic)
+		elseif inst:IsA("BasePart") then
+			setProp(inst, "CastShadow", false)
+			setProp(inst, "Reflectance", 0)
+			setProp(inst, "Material", Enum.Material.SmoothPlastic)
+		elseif inst:IsA("PostEffect") then
+			setProp(inst, "Enabled", false)
+		elseif inst:IsA("Clouds") then
+			setProp(inst, "Cover", 0)
+			setProp(inst, "Density", 0)
+		elseif inst:IsA("Atmosphere") then
+			setProp(inst, "Density", 0)
+			setProp(inst, "Haze", 0)
+			setProp(inst, "Glare", 0)
+		end
+	end
+
+	local function applyGlobalSettings()
+		local rendering = settings().Rendering
+		local terrain = workspace.Terrain
+
+		local function push(obj, prop, value)
+			pushSetting(function()
+				return obj[prop]
+			end, function(v)
+				obj[prop] = v
+			end, value)
+		end
+
+		push(rendering, "QualityLevel", Enum.QualityLevel.Level01)
+		push(rendering, "MeshPartDetailLevel", Enum.MeshPartDetailLevel.Level01)
+		push(rendering, "EditQualityLevel", Enum.QualityLevel.Level01)
+
+		local ok, gameSettings = pcall(function()
+			return UserSettings():GetService("UserGameSettings")
+		end)
+		if ok and gameSettings then
+			push(gameSettings, "SavedQualityLevel", Enum.SavedQualitySetting.QualityLevel1)
+		end
+
+		push(Lighting, "GlobalShadows", false)
+		push(Lighting, "ShadowSoftness", 0)
+		push(Lighting, "FogEnd", 9e9)
+		push(Lighting, "Technology", Enum.Technology.Legacy)
+		push(Lighting, "EnvironmentDiffuseScale", 0)
+		push(Lighting, "EnvironmentSpecularScale", 0)
+		push(terrain, "Decoration", false)
+		push(terrain, "WaterWaveSize", 0)
+		push(terrain, "WaterWaveSpeed", 0)
+		push(terrain, "WaterReflectance", 0)
+		push(terrain, "WaterTransparency", 1)
+	end
+
+	local function scan(root, myToken)
+		local last = os.clock()
+		for _, d in ipairs(root:GetDescendants()) do
+			if not active or token ~= myToken then
+				return false
+			end
+			optimize(d)
+			if os.clock() - last > BUDGET then
+				RunService.Heartbeat:Wait()
+				last = os.clock()
+			end
+		end
+		return true
+	end
+
+	local function stopOptimizer()
+		if not active then
+			return
+		end
+		active = false
+		token += 1
+
+		for _, c in ipairs(conns) do
+			if c.Connected then
+				c:Disconnect()
+			end
+		end
+		table.clear(conns)
+
+		if heartbeatConn then
+			pcall(function()
+				heartbeatConn:Disconnect()
+			end)
+			heartbeatConn = nil
+		end
+
+		table.clear(pending)
+		if thread then
+			pcall(task.cancel, thread)
+			thread = nil
+		end
+
+		local last = os.clock()
+		for inst, props in pairs(original) do
+			if inst.Parent then
+				for prop, saved in pairs(props) do
+					pcall(function()
+						inst[prop] = saved.Value
+					end)
+				end
+			end
+			original[inst] = nil
+			if os.clock() - last > BUDGET then
+				RunService.Heartbeat:Wait()
+				last = os.clock()
+			end
+		end
+
+		for i = #settingRestore, 1, -1 do
+			local s = settingRestore[i]
+			pcall(s.Setter, s.Value)
+		end
+		table.clear(settingRestore)
+	end
+
+	local function startOptimizer()
+		if active then
+			return
+		end
+		active = true
+		token += 1
+		local myToken = token
+		applyGlobalSettings()
+
+		local function watch(root)
+			conns[#conns + 1] = root.DescendantAdded:Connect(function(d)
+				if active and token == myToken then
+					pending[#pending + 1] = d
+				end
+			end)
+		end
+		watch(workspace)
+		watch(Lighting)
+
+		heartbeatConn = RunService.Heartbeat:Connect(function()
+			if not active or token ~= myToken or #pending == 0 then
+				return
+			end
+			local last = os.clock()
+			while #pending > 0 do
+				optimize(table.remove(pending))
+				if os.clock() - last > BUDGET then
+					break
+				end
+			end
+		end)
+
+		thread = task.spawn(function()
+			if scan(workspace, myToken) then
+				scan(Lighting, myToken)
+			end
+		end)
+	end
+
+	OnCleanup(stopOptimizer)
+
+	UtilityTab:CreateToggle({
+		Title = "Optimizer (Max FPS)",
+		Default = false,
+		Flag = "Optimizer",
+		Callback = function(state)
+			if state then
+				startOptimizer()
+			else
+				task.spawn(stopOptimizer)
+			end
+		end,
+	})
+end
+
+-- FPS & Ping overlay
+do
+	local BASE_WIDTH = 132
+	local WIDTH_RATIO = 0.085
+	local UPDATE_INTERVAL = 0.2
+	local SMOOTH = 8
+
+	local GREEN = Color3.fromRGB(58, 255, 55)
+	local YELLOW = Color3.fromRGB(255, 214, 84)
+	local RED = Color3.fromRGB(255, 96, 96)
+	local GREY = Color3.fromRGB(150, 150, 158)
+
+	local enabled = false
+	local overlayPos = UDim2.new(0, 16, 0, 16)
+	local sizeMultiplier = 1
+	local conns = {}
+	local gui, frame, uiScale, fpsLabel, pingLabel
+	local smoothFps, nextUpdate = 0, 0
+	local lastFpsText, lastPingText = nil, nil
+
+	local font = nil
+	pcall(function()
+		font = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.ExtraBold, Enum.FontStyle.Normal)
+	end)
+
+	local function fpsColor(v)
+		if v >= 100 then
+			return GREEN
+		end
+		if v >= 50 then
+			return YELLOW
+		end
+		return RED
+	end
+
+	local function pingColor(v)
+		if v <= 90 then
+			return GREEN
+		end
+		if v <= 180 then
+			return YELLOW
+		end
+		return RED
+	end
+
+	local function updateScale()
+		if not uiScale then
+			return
+		end
+		local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+		if vp.X < 1 then
+			vp = Vector2.new(1280, 720)
+		end
+		uiScale.Scale = math.clamp(vp.X * WIDTH_RATIO / BASE_WIDTH, 0.7, 1.4) * sizeMultiplier
+	end
+
+	local function destroyOverlay()
+		for _, c in ipairs(conns) do
+			pcall(function()
+				c:Disconnect()
+			end)
+		end
+		table.clear(conns)
+		if gui then
+			pcall(function()
+				gui:Destroy()
+			end)
+		end
+		gui, frame, uiScale, fpsLabel, pingLabel = nil, nil, nil, nil, nil
+		lastFpsText, lastPingText = nil, nil
+		smoothFps = 0
+	end
+
+	local function makeLabel(parent, x, width, color)
+		local label = Instance.new("TextLabel")
+		label.Name = RandName()
+		label.BackgroundTransparency = 1
+		label.Position = UDim2.fromOffset(x, 9)
+		label.Size = UDim2.fromOffset(width, 16)
+		label.Text = ""
+		label.TextColor3 = color
+		label.TextScaled = true
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		if font then
+			label.FontFace = font
+		else
+			label.Font = Enum.Font.GothamBold
+		end
+		label.Parent = parent
+		return label
+	end
+
+	local function createOverlay()
+		destroyOverlay()
+
+		gui = Instance.new("ScreenGui")
+		gui.Name = RandName()
+		gui.Archivable = false
+		gui.DisplayOrder = 58
+		gui.IgnoreGuiInset = true
+		gui.ResetOnSpawn = false
+		gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+		frame = Instance.new("Frame")
+		frame.Name = RandName()
+		frame.Active = true
+		frame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+		frame.BackgroundTransparency = 0.28
+		frame.BorderSizePixel = 0
+		frame.Position = overlayPos
+		frame.Size = UDim2.fromOffset(132, 34)
+		frame.Parent = gui
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 12)
+		corner.Parent = frame
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromRGB(255, 255, 255)
+		stroke.Thickness = 1
+		stroke.Transparency = 0.9
+		stroke.Parent = frame
+
+		uiScale = Instance.new("UIScale")
+		uiScale.Parent = frame
+		updateScale()
+
+		fpsLabel = makeLabel(frame, 12, 34, GREEN)
+		makeLabel(frame, 48, 22, GREY).Text = "FPS"
+
+		local divider = Instance.new("Frame")
+		divider.Name = RandName()
+		divider.AnchorPoint = Vector2.new(0.5, 0.5)
+		divider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		divider.BackgroundTransparency = 0.85
+		divider.BorderSizePixel = 0
+		divider.Position = UDim2.new(0, 74, 0.5, 0)
+		divider.Size = UDim2.fromOffset(1, 14)
+		divider.Parent = frame
+
+		pingLabel = makeLabel(frame, 82, 30, GREEN)
+		makeLabel(frame, 113, 14, GREY).Text = "ms"
+
+		gui.Parent = GuiParent
+
+		local camera = workspace.CurrentCamera
+		if camera then
+			conns[#conns + 1] = camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+		end
+
+		-- drag
+		local dragging = false
+		local dragInput = nil
+		local startMouse = Vector2.zero
+		local startPos = nil
+
+		conns[#conns + 1] = frame.InputBegan:Connect(function(input)
+			if dragging or input.UserInputState ~= Enum.UserInputState.Begin then
+				return
+			end
+			local isTouch = input.UserInputType == Enum.UserInputType.Touch
+			if input.UserInputType ~= Enum.UserInputType.MouseButton1 and not isTouch then
+				return
+			end
+			dragging = true
+			dragInput = isTouch and input or nil
+			startMouse = Vector2.new(input.Position.X, input.Position.Y)
+			startPos = frame.Position
+		end)
+
+		conns[#conns + 1] = UserInputService.InputChanged:Connect(function(input)
+			if not dragging or not frame or not startPos then
+				return
+			end
+			local valid = (dragInput and input == dragInput) or (not dragInput and input.UserInputType == Enum.UserInputType.MouseMovement)
+			if not valid then
+				return
+			end
+			local delta = Vector2.new(input.Position.X, input.Position.Y) - startMouse
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end)
+
+		conns[#conns + 1] = UserInputService.InputEnded:Connect(function(input)
+			if not dragging then
+				return
+			end
+			if (dragInput and input == dragInput) or (not dragInput and input.UserInputType == Enum.UserInputType.MouseButton1) then
+				dragging = false
+				dragInput = nil
+				startPos = nil
+				if frame then
+					overlayPos = frame.Position
+				end
+			end
+		end)
+
+		conns[#conns + 1] = RunService.RenderStepped:Connect(function(dt)
+			if not enabled or not fpsLabel then
+				return
+			end
+			local d = math.clamp(dt, 0.001, 1)
+			local instant = 1 / d
+			if smoothFps <= 0 then
+				smoothFps = instant
+			else
+				smoothFps += (instant - smoothFps) * (1 - math.exp(-d * SMOOTH))
+			end
+
+			local now = os.clock()
+			if now < nextUpdate then
+				return
+			end
+			nextUpdate = now + UPDATE_INTERVAL
+
+			local fps = math.floor(smoothFps + 0.5)
+			local fpsText = tostring(fps)
+			if fpsText ~= lastFpsText then
+				lastFpsText = fpsText
+				fpsLabel.Text = fpsText
+				fpsLabel.TextColor3 = fpsColor(fps)
+			end
+
+			local ping = 0
+			pcall(function()
+				ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+			end)
+			ping = math.floor(ping + 0.5)
+			local pingText = tostring(ping)
+			if pingText ~= lastPingText then
+				lastPingText = pingText
+				pingLabel.Text = pingText
+				pingLabel.TextColor3 = pingColor(ping)
+			end
+		end)
+	end
+
+	OnCleanup(destroyOverlay)
+
+	UtilityTab:CreateToggle({
+		Title = "FPS and Ping Overlay",
+		Default = true,
+		Flag = "FPSPingOverlay",
+		Callback = function(state)
+			enabled = state == true
+			if enabled then
+				createOverlay()
+			else
+				destroyOverlay()
+			end
+		end,
+	})
+
+	UtilityTab:CreateSlider({
+		Title = "Overlay Size",
+		Min = 60,
+		Max = 160,
+		Default = 100,
+		Suffix = "%",
+		Flag = "OverlaySize",
+		Callback = function(value)
+			sizeMultiplier = math.clamp((tonumber(value) or 100) / 100, 0.6, 1.6)
+			updateScale()
+		end,
+	})
+end
+
+Notify("Rossi.Draft", "Ride A Pet loaded (LUNO UI).")
