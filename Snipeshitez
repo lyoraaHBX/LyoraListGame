@@ -72,28 +72,30 @@ do
     -- Konstanta (gampang diubah untuk debug)
     local HEIST_RETRY_DELAY      = 3   -- delay retry kalau start gagal
     local HEIST_COLLECT_INTERVAL = 10  -- interval polling collect
-    local HEIST_DELAY_BETWEEN    = 2   -- delay antar siklus heist
+    local HEIST_DELAY_BETWEEN    = 2   -- delay sebelum start heist berikutnya
     local MAX_HEIST_SLOT         = 4   -- range random slot/crew (1 s/d N), sesuaikan kalau perlu
 
-    -- List heist: HANYA id (modular, gampang tambah/kurang)
+    -- List heist: id + name (name buat ditampilkan di dropdown)
     local HEIST_LIST = {
-        { id = "heist_cornerstore" },
-        { id = "heist_truck" },
-        { id = "heist_museum" },
-        { id = "heist_vault" },
-        { id = "heist_bullion" },
-        { id = "heist_firstoath" },
-        { id = "heist_cistern" },
+        { id = "heist_cornerstore", name = "Corner Store Smash" },
+        { id = "heist_truck",       name = "Armored Truck Ambush" },
+        { id = "heist_museum",      name = "Museum After Dark" },
+        { id = "heist_vault",       name = "Grand Vault of Caldera" },
+        { id = "heist_bullion",     name = "The Sterling Bullion Run" },
+        { id = "heist_firstoath",   name = "The Vault of the First Oath" },
+        { id = "heist_cistern",     name = "The Cistern Vault" },
     }
 
-    -- Dropdown pakai id langsung sebagai display text (tidak perlu mapping nama)
-    local HeistIdList = {}
+    -- Mapping nama -> data heist (untuk lookup pas dropdown milih 1 nama)
+    local HeistNameToData = {}
+    local HeistNameList = {}
     for _, heistData in ipairs(HEIST_LIST) do
-        table.insert(HeistIdList, heistData.id)
+        HeistNameToData[heistData.name] = heistData
+        table.insert(HeistNameList, heistData.name)
     end
 
-    -- Set heist id yang dipilih user via dropdown (bisa lebih dari 1)
-    local SelectedHeistIds = {} -- { [id] = true }
+    -- Heist yang sedang dipilih (single select)
+    local SelectedHeist = nil -- { id = ..., name = ... }
 
     local HeistTab = LunoLibrary:CreateTab("Heist")
 
@@ -132,17 +134,6 @@ do
         return result ~= nil and result.ok == true and result.collected == true
     end
 
-    -- Ambil daftar id heist yang sedang dipilih (array, urutan sesuai HEIST_LIST)
-    local function GetSelectedHeistList()
-        local list = {}
-        for _, heistData in ipairs(HEIST_LIST) do
-            if SelectedHeistIds[heistData.id] then
-                table.insert(list, heistData)
-            end
-        end
-        return list
-    end
-
     ----------------------------------------------------------------
     -- STATE
     ----------------------------------------------------------------
@@ -172,11 +163,9 @@ do
     end
 
     ----------------------------------------------------------------
-    -- MAIN LOOP
+    -- MAIN LOOP (single heist, repeat forever: start -> collect -> start -> ...)
     ----------------------------------------------------------------
     local function AutoHeistLoop()
-        local heistIndex = 1
-
         while AutoHeistEnabled do
             if HeistLimitReached then
                 AutoHeistEnabled = false
@@ -184,9 +173,7 @@ do
                 break
             end
 
-            local selectedList = GetSelectedHeistList()
-
-            if #selectedList == 0 then
+            if not SelectedHeist then
                 LunoLibrary:Notify({
                     Title = "Auto Heist",
                     Content = "Belum ada heist yang dipilih di dropdown!",
@@ -197,10 +184,7 @@ do
                 break
             end
 
-            if heistIndex > #selectedList then
-                heistIndex = 1
-            end
-            local heistData = selectedList[heistIndex]
+            local heistData = SelectedHeist
 
             ----------------------------------------------------------------
             -- 1. START PHASE (retry sampai berhasil "on the board" / limit / stop)
@@ -214,7 +198,7 @@ do
                     if IsHeistOnBoard(result) then
                         LunoLibrary:Notify({
                             Title = "Auto Heist",
-                            Content = "Heist dimulai: " .. heistData.id,
+                            Content = "Heist dimulai: " .. heistData.name,
                             Duration = 3
                         })
                         started = true
@@ -252,7 +236,7 @@ do
                     elseif IsHeistCollected(result) then
                         LunoLibrary:Notify({
                             Title = "Auto Heist",
-                            Content = heistData.id .. " Collected! XP: " .. tostring(result.xp) .. " | Cash: " .. tostring(result.cash),
+                            Content = heistData.name .. " Collected! XP: " .. tostring(result.xp) .. " | Cash: " .. tostring(result.cash),
                             Duration = 4
                         })
                         collected = true
@@ -264,7 +248,6 @@ do
 
             if not AutoHeistEnabled then break end
 
-            heistIndex = heistIndex + 1
             task.wait(HEIST_DELAY_BETWEEN)
         end
     end
@@ -275,18 +258,12 @@ do
     HeistTab:CreateSection("Auto Heist")
 
     HeistTab:CreateDropdown({
-        Title = "Pilih Heist (Multi-Select)",
-        Options = HeistIdList,
-        Multi = true,
-        Default = {},
-        Flag = "SelectedHeistIds",
-        Callback = function(SelectedNames)
-            SelectedHeistIds = {}
-            if type(SelectedNames) == "table" then
-                for _, heistId in ipairs(SelectedNames) do
-                    SelectedHeistIds[heistId] = true
-                end
-            end
+        Title = "Pilih Heist",
+        Options = HeistNameList,
+        Multi = false,
+        Flag = "SelectedHeistName",
+        Callback = function(SelectedName)
+            SelectedHeist = HeistNameToData[SelectedName]
         end
     })
 
