@@ -60,3 +60,193 @@ for i, feature in ipairs(FeatureModules) do
         warn("[FeatureLoad Error] " .. feature.url .. ": " .. tostring(mod))
     end
 end
+
+----------------------------------------------------------------
+-- [[ AUTO HEIST - INLINE (BELUM MODULAR, UNTUK MEMPERMUDAH DEBUG) ]]
+----------------------------------------------------------------
+do
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+    local JOB_HASH = "ca01587a32b24eb1a0527e8e595e8483"
+
+    -- Konstanta (gampang diubah untuk debug)
+    local HEIST_RETRY_DELAY     = 3   -- delay retry kalau start gagal
+    local HEIST_COLLECT_INTERVAL = 10 -- interval polling collect
+    local HEIST_DELAY_BETWEEN   = 2   -- delay antar siklus heist
+    local MAX_HEIST_SLOT        = 4   -- range random slot/crew (1 s/d N), sesuaikan kalau perlu
+
+    -- List heist: id saja, tinggal tambah/edit manual di sini
+    -- NOTE: nanti bisa diganti/ditambah data lain per heist (level requirement, dsb) kalau sudah dimodularkan
+    local HEIST_LIST = {
+        { id = "heist_cornerstore" },
+        -- { id = "heist_jewelrystore" },
+        -- { id = "heist_bank" },
+    }
+
+    local HeistTab = LunoLibrary:CreateTab("Heist")
+
+    local MWRemotes, HeistActionEvent
+    pcall(function()
+        MWRemotes       = ReplicatedStorage:WaitForChild("MW"):WaitForChild("Remotes")
+        HeistActionEvent = MWRemotes:WaitForChild("HeistAction")
+    end)
+
+    local function HeistAction(action, heistId, slot)
+        if not HeistActionEvent then return false, nil end
+        local ok, result = pcall(function()
+            return table.pack(HeistActionEvent:InvokeServer(JOB_HASH, action, heistId, slot))
+        end)
+        if ok and result[1] then
+            return true, result[1]
+        end
+        return false, nil
+    end
+
+    -- Deteksi heist berhasil di-start (jangan spam start lagi kalau sudah muncul ini)
+    local function IsHeistOnBoard(result)
+        if result and result.ok == true and result.msg then
+            return tostring(result.msg):lower():find("on the board") ~= nil
+        end
+        return false
+    end
+
+    -- Deteksi limit harian tercapai (stop semua sistem + visual UI)
+    local function IsHeistLimitReached(result)
+        if result and result.ok == false and result.msg then
+            return tostring(result.msg):lower():find("already started") ~= nil
+        end
+        return false
+    end
+
+    -- Deteksi collect berhasil
+    local function IsHeistCollected(result)
+        return result ~= nil and result.ok == true and result.collected == true
+    end
+
+    ----------------------------------------------------------------
+    -- STATE
+    ----------------------------------------------------------------
+    local AutoHeistEnabled  = false
+    local HeistLimitReached = false
+    local AutoHeistToggleRef = nil
+
+    local function StopAutoHeist(reason)
+        AutoHeistEnabled  = false
+        HeistLimitReached = true
+        print("[AUTO HEIST] DIHENTIKAN PERMANEN (limit harian): " .. tostring(reason))
+        if AutoHeistToggleRef then
+            pcall(function() AutoHeistToggleRef:Set(false) end)
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- MAIN LOOP
+    ----------------------------------------------------------------
+    local function AutoHeistLoop()
+        local heistIndex = 1
+
+        while AutoHeistEnabled do
+            if HeistLimitReached then
+                AutoHeistEnabled = false
+                break
+            end
+
+            if #HEIST_LIST == 0 then
+                print("[AUTO HEIST] HEIST_LIST kosong, tidak ada heist untuk dijalankan.")
+                AutoHeistEnabled = false
+                break
+            end
+
+            if heistIndex > #HEIST_LIST then
+                heistIndex = 1
+            end
+            local heistData = HEIST_LIST[heistIndex]
+
+            ----------------------------------------------------------------
+            -- 1. START PHASE (retry sampai berhasil "on the board" / limit / stop)
+            ----------------------------------------------------------------
+            local started = false
+            while AutoHeistEnabled and not started do
+                local randomSlot = math.random(1, MAX_HEIST_SLOT)
+                local invokeOk, result = HeistAction("start", heistData.id, randomSlot)
+
+                if invokeOk and result then
+                    if IsHeistOnBoard(result) then
+                        print("[AUTO HEIST] Started: " .. heistData.id .. " (slot " .. randomSlot .. ") | " .. tostring(result.msg))
+                        started = true
+                    elseif IsHeistLimitReached(result) then
+                        StopAutoHeist(result.msg)
+                        return
+                    elseif result.ok == false then
+                        print("[AUTO HEIST] Start gagal (" .. heistData.id .. "): " .. tostring(result.msg))
+                        task.wait(HEIST_RETRY_DELAY)
+                    else
+                        -- ok=true tapi msg tidak mengandung "on the board" -> anggap tetap started
+                        print("[AUTO HEIST] Started (unexpected msg): " .. tostring(result.msg))
+                        started = true
+                    end
+                else
+                    task.wait(HEIST_RETRY_DELAY)
+                end
+
+                if not AutoHeistEnabled then break end
+            end
+
+            if not AutoHeistEnabled then break end
+
+            ----------------------------------------------------------------
+            -- 2. COLLECT PHASE (polling sampai selesai / limit / stop)
+            ----------------------------------------------------------------
+            local collected = false
+            while AutoHeistEnabled and not collected do
+                task.wait(HEIST_COLLECT_INTERVAL)
+
+                local randomSlot = math.random(1, MAX_HEIST_SLOT)
+                local invokeOk, result = HeistAction("collect", nil, randomSlot)
+
+                if invokeOk and result then
+                    if IsHeistLimitReached(result) then
+                        StopAutoHeist(result.msg)
+                        return
+                    elseif IsHeistCollected(result) then
+                        print("[AUTO HEIST] Collected! XP: " .. tostring(result.xp) .. " | Cash: " .. tostring(result.cash))
+                        collected = true
+                    elseif result.ok == false then
+                        print("[AUTO HEIST] Collect belum siap (" .. heistData.id .. "): " .. tostring(result.msg))
+                    end
+                end
+
+                if not AutoHeistEnabled then break end
+            end
+
+            if not AutoHeistEnabled then break end
+
+            heistIndex = heistIndex + 1
+            task.wait(HEIST_DELAY_BETWEEN)
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- UI
+    ----------------------------------------------------------------
+    HeistTab:CreateSection("Auto Heist")
+
+    AutoHeistToggleRef = HeistTab:CreateToggle({
+        Title = "Auto Heist (Start & Collect Otomatis)",
+        Default = false,
+        Flag = "AutoHeistEnabled",
+        Callback = function(State)
+            if State and HeistLimitReached then
+                print("[AUTO HEIST] Limit harian sudah tercapai, tidak bisa dinyalakan lagi hari ini.")
+                AutoHeistEnabled = false
+                if AutoHeistToggleRef then
+                    pcall(function() AutoHeistToggleRef:Set(false) end)
+                end
+                return
+            end
+
+            AutoHeistEnabled = State
+            if State then task.spawn(AutoHeistLoop) end
+        end
+    })
+end
