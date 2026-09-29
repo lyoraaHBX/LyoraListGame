@@ -142,6 +142,23 @@ do
         BossActionEvent = MWRemotes:WaitForChild("BossAction")
     end)
 
+    ----------------------------------------------------------------
+    -- OPTIMIZED UI READER (dengan caching instance, tidak scan ulang tiap tick)
+    ----------------------------------------------------------------
+    local function IsValidInstance(inst)
+        return inst ~= nil and inst.Parent ~= nil
+    end
+
+    local CachedMafiaUI = nil
+    local function GetMafiaUI()
+        if IsValidInstance(CachedMafiaUI) then return CachedMafiaUI end
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not playerGui then return nil end
+        local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
+        if mafiaUI then CachedMafiaUI = mafiaUI end
+        return mafiaUI
+    end
+
     local function SafeIndex(root, ...)
         local current = root
         for _, name in ipairs({...}) do
@@ -165,158 +182,127 @@ do
         return nil
     end
 
+    -- Cari instance Text yang cocok pattern (dipakai cuma sekali sampai cache invalid)
+    local function FindTextInstance(root, pattern)
+        if not root then return nil end
+        local okSelf, selfText = pcall(function() return root.Text end)
+        if okSelf and selfText and tostring(selfText):match(pattern) then
+            return root
+        end
+        local ok, descendants = pcall(function() return root:GetDescendants() end)
+        if not ok then return nil end
+        for _, desc in ipairs(descendants) do
+            local okT, txt = pcall(function() return desc.Text end)
+            if okT and txt and tostring(txt):match(pattern) then
+                return desc
+            end
+        end
+        return nil
+    end
+
+    local TextCache = {
+        LevelBadge = nil,
+        StaminaBar = nil,
+        HealthBar  = nil,
+        PowerBadge = nil,
+    }
+
     local function GetMyLevel()
-        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-        if not playerGui then return nil end
-        local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
-        if not mafiaUI then return nil end
-
-        local levelBadge = SafeIndex(mafiaUI, "Root", "TopBar", "AvatarCard", "AvatarCluster", "AvatarFrame", "LevelBadge")
-        if not levelBadge then
-            levelBadge = FindDescendantByName(mafiaUI, "LevelBadge")
-            if not levelBadge then return nil end
-        end
-
-        local allDescendants = levelBadge:GetDescendants()
-
-        local okSelf, selfText = pcall(function() return levelBadge.Text end)
-        if okSelf and selfText then
-            local num = tostring(selfText):match("^%s*(%d+)%s*$")
-            if num then return tonumber(num) end
-        end
-
-        for _, desc in ipairs(allDescendants) do
-            local ok, txt = pcall(function() return desc.Text end)
+        local cached = TextCache.LevelBadge
+        if IsValidInstance(cached) then
+            local ok, txt = pcall(function() return cached.Text end)
             if ok and txt then
                 local num = tostring(txt):match("^%s*(%d+)%s*$")
                 if num then return tonumber(num) end
             end
         end
+
+        local mafiaUI = GetMafiaUI()
+        if not mafiaUI then return nil end
+
+        local levelBadge = SafeIndex(mafiaUI, "Root", "TopBar", "AvatarCard", "AvatarCluster", "AvatarFrame", "LevelBadge")
+        if not levelBadge then
+            levelBadge = FindDescendantByName(mafiaUI, "LevelBadge")
+        end
+        if not levelBadge then return nil end
+
+        local textInst = FindTextInstance(levelBadge, "^%s*%d+%s*$")
+        if textInst then
+            TextCache.LevelBadge = textInst
+            local num = tostring(textInst.Text):match("^%s*(%d+)%s*$")
+            if num then return tonumber(num) end
+        end
         return nil
     end
 
-    local function ReadBarValue(barName, debugMode)
-        local debugLog = {}
-        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-        if not playerGui then
-            table.insert(debugLog, "PlayerGui: NOT FOUND")
-            if debugMode then return nil, debugLog end
-            return nil
+    local function ReadBarValue(barName)
+        local cached = TextCache[barName]
+        if IsValidInstance(cached) then
+            local ok, txt = pcall(function() return cached.Text end)
+            if ok and txt then
+                local currentStr = tostring(txt):match("^%s*(%d+)%s*/%s*%d+%s*$")
+                if currentStr then return tonumber(currentStr) end
+            end
         end
-        table.insert(debugLog, "PlayerGui: OK")
 
-        local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
-        if not mafiaUI then
-            table.insert(debugLog, "MafiaWarsUI: NOT FOUND")
-            if debugMode then return nil, debugLog end
-            return nil
-        end
-        table.insert(debugLog, "MafiaWarsUI: OK")
+        local mafiaUI = GetMafiaUI()
+        if not mafiaUI then return nil end
 
         local barValue = SafeIndex(mafiaUI, "Root", "TopBar", "BarsCluster", barName, "Value")
-
-        if barValue then
-            table.insert(debugLog, barName .. ".Value (exact path): OK")
-        else
+        if not barValue then
             local barRoot = FindDescendantByName(mafiaUI, barName)
             if barRoot then
                 barValue = barRoot:FindFirstChild("Value") or barRoot
-                table.insert(debugLog, barName .. " (fallback search): OK")
-            else
-                table.insert(debugLog, barName .. ": NOT FOUND")
-                if debugMode then return nil, debugLog end
-                return nil
             end
         end
+        if not barValue then return nil end
 
-        local candidates = {}
-        local okSelf, selfText = pcall(function() return barValue.Text end)
-        if okSelf and selfText then
-            local currentStr, maxStr = tostring(selfText):match("^%s*(%d+)%s*/%s*(%d+)%s*$")
-            if currentStr then
-                table.insert(candidates, {name = "Value itself", current = tonumber(currentStr), max = tonumber(maxStr)})
-            end
+        local textInst = FindTextInstance(barValue, "^%s*%d+%s*/%s*%d+%s*$")
+        if textInst then
+            TextCache[barName] = textInst
+            local currentStr = tostring(textInst.Text):match("^%s*(%d+)%s*/%s*%d+%s*$")
+            if currentStr then return tonumber(currentStr) end
         end
-
-        local allDescendants = barValue:GetDescendants()
-        for _, desc in ipairs(allDescendants) do
-            local ok, txt = pcall(function() return desc.Text end)
-            if ok and txt then
-                local currentStr, maxStr = tostring(txt):match("^%s*(%d+)%s*/%s*(%d+)%s*$")
-                if currentStr then
-                    table.insert(candidates, {name = desc.Name, current = tonumber(currentStr), max = tonumber(maxStr)})
-                end
-            end
-        end
-
-        table.insert(debugLog, "Total candidates found: " .. #candidates)
-        if #candidates > 0 then
-            local chosen = candidates[1]
-            table.insert(debugLog, "Chosen Current Value: " .. chosen.current)
-            if debugMode then return chosen.current, debugLog end
-            return chosen.current
-        end
-        if debugMode then return nil, debugLog end
         return nil
     end
 
-    local function GetMyStamina(debugMode) return ReadBarValue("StaminaBar", debugMode) end
-    local function GetMyHealth(debugMode) return ReadBarValue("HealthBar", debugMode) end
+    local function GetMyStamina() return ReadBarValue("StaminaBar") end
+    local function GetMyHealth() return ReadBarValue("HealthBar") end
 
-    local function GetMyPower(debugMode)
-        local debugLog = {}
-        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-        if not playerGui then
-            table.insert(debugLog, "PlayerGui: NOT FOUND")
-            if debugMode then return nil, debugLog end
-            return nil
+    local function GetMyPower()
+        local cached = TextCache.PowerBadge
+        if IsValidInstance(cached) then
+            local ok, txt = pcall(function() return cached.Text end)
+            if ok and txt then
+                local num = tostring(txt):match("(%d+)%s*$")
+                if num then return tonumber(num) end
+            end
         end
-        local mafiaUI = playerGui:FindFirstChild("MafiaWarsUI")
-        if not mafiaUI then
-            table.insert(debugLog, "MafiaWarsUI: NOT FOUND")
-            if debugMode then return nil, debugLog end
-            return nil
-        end
+
+        local mafiaUI = GetMafiaUI()
+        if not mafiaUI then return nil end
 
         local badgeValue = SafeIndex(mafiaUI, "Root", "Content", "FightPanel", "PowerGrid", "BadgeAttack", "Value")
         if not badgeValue then
             local badgeRoot = FindDescendantByName(mafiaUI, "BadgeAttack")
             if badgeRoot then
                 badgeValue = badgeRoot:FindFirstChild("Value") or badgeRoot
-            else
-                table.insert(debugLog, "BadgeAttack: NOT FOUND")
-                if debugMode then return nil, debugLog end
-                return nil
             end
         end
+        if not badgeValue then return nil end
 
-        local candidates = {}
-        local okSelf, selfText = pcall(function() return badgeValue.Text end)
-        if okSelf and selfText then
-            local num = tostring(selfText):match("(%d+)%s*$")
-            if num then table.insert(candidates, {text = selfText, num = tonumber(num)}) end
+        local textInst = FindTextInstance(badgeValue, "%d+%s*$")
+        if textInst then
+            TextCache.PowerBadge = textInst
+            local num = tostring(textInst.Text):match("(%d+)%s*$")
+            if num then return tonumber(num) end
         end
-
-        local allDescendants = badgeValue:GetDescendants()
-        for _, desc in ipairs(allDescendants) do
-            local ok, txt = pcall(function() return desc.Text end)
-            if ok and txt then
-                local num = tostring(txt):match("(%d+)%s*$")
-                if num then table.insert(candidates, {text = txt, num = tonumber(num)}) end
-            end
-        end
-
-        table.insert(debugLog, "Total power candidates found: " .. #candidates)
-        if #candidates > 0 then
-            local chosen = candidates[1]
-            table.insert(debugLog, "Chosen Power: " .. chosen.num)
-            if debugMode then return chosen.num, debugLog end
-            return chosen.num
-        end
-        if debugMode then return nil, debugLog end
         return nil
     end
 
+    ----------------------------------------------------------------
+    -- REMOTE CALLS
+    ----------------------------------------------------------------
     local function GetHitList(forceRefresh)
         if not GetHitListEvent then return {} end
         local ok, result = pcall(function()
@@ -424,7 +410,6 @@ do
     ----------------------------------------------------------------
     -- AUTO ATTACK PLAYER - MULTI TARGET ROUND ROBIN SCHEDULER
     ----------------------------------------------------------------
-    -- activeTargets: { {target=<hitlistEntry>, nextAttackTime=<clock>, winStreak=<int>}, ... }
     local AutoAttackEnabled = false
     local WasWaitingForStamina = false
     local WasWaitingForHealth = false
@@ -433,7 +418,7 @@ do
         local activeTargets = {}
 
         while AutoAttackEnabled do
-            local myHealth = GetMyHealth(false)
+            local myHealth = GetMyHealth()
             if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
                 if not WasWaitingForHealth then
                     LunoLibrary:Notify({ Title = "Auto Attack", Content = "Health rendah (" .. tostring(myHealth) .. "), menunggu regen...", Duration = 3 })
@@ -448,7 +433,7 @@ do
                 end
             end
 
-            local myStamina = GetMyStamina(false)
+            local myStamina = GetMyStamina()
             if myStamina ~= nil and myStamina <= 0 then
                 if not WasWaitingForStamina then
                     LunoLibrary:Notify({ Title = "Auto Attack", Content = "Stamina habis! Menunggu...", Duration = 3 })
@@ -482,7 +467,6 @@ do
                     if invokeSuccess and battleResult then
                         if IsHospitalized(battleResult) then
                             print("[AUTO ATTACK] Hospitalized saat retry " .. entry.target.name)
-                            -- biarkan, health check global akan pause loop
                         elseif battleResult.ok == false then
                             print("[AUTO ATTACK] Error retry " .. entry.target.name .. ": " .. tostring(battleResult.msg))
                             table.remove(activeTargets, i)
@@ -553,8 +537,6 @@ do
     ----------------------------------------------------------------
     -- BOT FARM - MULTI TARGET ROUND ROBIN SCHEDULER (UNLIMITED REPEAT)
     ----------------------------------------------------------------
-    -- activeBots: { {bot=<botData>, nextAttackTime=<clock>}, ... }
-    -- lostBots: set userId yang sudah kalah, permanen tidak diserang lagi
     local BotFarmEnabled = false
     local BotWasWaitingForStamina = false
     local BotWasWaitingForHealth = false
@@ -563,10 +545,10 @@ do
     local function BotFarmLoop()
         local activeBots = {}
         local lostBots = {}
-        local botCursor = 1 -- pointer bot berikutnya yang belum pernah dicoba unlock
+        local botCursor = 1
 
         while BotFarmEnabled do
-            local myHealth = GetMyHealth(false)
+            local myHealth = GetMyHealth()
             if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
                 if not BotWasWaitingForHealth then
                     LunoLibrary:Notify({ Title = "Bot Farm", Content = "Health rendah, menunggu regen...", Duration = 3 })
@@ -581,7 +563,7 @@ do
                 end
             end
 
-            local myStamina = GetMyStamina(false)
+            local myStamina = GetMyStamina()
             if myStamina ~= nil and myStamina <= 0 then
                 if not BotWasWaitingForStamina then
                     LunoLibrary:Notify({ Title = "Bot Farm", Content = "Stamina habis! Menunggu...", Duration = 3 })
@@ -617,7 +599,6 @@ do
                         else
                             print("[BOT FARM] " .. FormatBattleReport(result):gsub("\n", " | "))
                             if result.won then
-                                -- UNLIMITED repeat, tetap aktif, jadwalkan ulang
                                 entry.nextAttackTime = now + ATTACK_REPEAT_DELAY
                             else
                                 LunoLibrary:Notify({
@@ -683,7 +664,6 @@ do
                     end
                     botCursor = botCursor + 1
                 else
-                    -- Power belum cukup untuk bot berikutnya -> stop unlock, tunggu power naik
                     if not BotWasWaitingForPower then
                         LunoLibrary:Notify({
                             Title = "Bot Farm",
@@ -696,7 +676,6 @@ do
                 end
             end
 
-            -- Cek apakah semua bot sudah selesai (habis dari list, tidak ada yang aktif)
             if botCursor > #BOT_LIST and #activeBots == 0 then
                 LunoLibrary:Notify({
                     Title = "Bot Farm",
@@ -716,7 +695,7 @@ do
     end
 
     ----------------------------------------------------------------
-    -- AUTO BOSS LOOP (tidak berubah)
+    -- AUTO BOSS LOOP
     ----------------------------------------------------------------
     local AutoBossEnabled = false
     local WasWaitingForBossHealth = false
@@ -754,7 +733,7 @@ do
                 end
             end
 
-            local myHealth = GetMyHealth(false)
+            local myHealth = GetMyHealth()
             if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
                 if not WasWaitingForBossHealth then
                     LunoLibrary:Notify({ Title = "Auto Boss", Content = "Health rendah, menunggu regen...", Duration = 3 })
@@ -821,7 +800,7 @@ do
     end
 
     ----------------------------------------------------------------
-    -- UI SECTIONS
+    -- UI SECTIONS (Debug & Test Attack sudah dihapus)
     ----------------------------------------------------------------
 
     FightTab:CreateSection("Auto Attack")
@@ -833,46 +812,6 @@ do
         Callback = function(State)
             AutoAttackEnabled = State
             if State then task.spawn(AutoAttackLoop) end
-        end
-    })
-
-    FightTab:CreateButton({
-        Title = "Test Attack (Manual Trigger Sekali Jalan)",
-        Callback = function()
-            local myHealth = GetMyHealth(false)
-            if myHealth ~= nil and myHealth < MIN_HEALTH_TO_RESUME then
-                LunoLibrary:Notify({ Title = "Test Attack", Content = "Health rendah, tunggu regen!", Duration = 3 })
-                return
-            end
-            local myStamina = GetMyStamina(false)
-            if myStamina ~= nil and myStamina <= 0 then
-                LunoLibrary:Notify({ Title = "Test Attack", Content = "Stamina 0!", Duration = 3 })
-                return
-            end
-            local myLevel = GetMyLevel()
-            if not myLevel then
-                LunoLibrary:Notify({ Title = "Test Attack", Content = "Level tidak terdeteksi!", Duration = 3 })
-                return
-            end
-
-            local list = GetHitList(false)
-            local target = FindNewValidTarget(list, myLevel, nil)
-            if not target then
-                list = GetHitList(true)
-                target = FindNewValidTarget(list, myLevel, nil)
-            end
-            if not target then
-                LunoLibrary:Notify({ Title = "Test Attack", Content = "Tidak ada target valid!", Duration = 3 })
-                return
-            end
-
-            local invokeSuccess, battleResult = AttackPlayer(target.userId)
-            if invokeSuccess and battleResult then
-                LunoLibrary:Notify({ Title = "Test Attack Result", Content = FormatBattleReport(battleResult), Duration = 5 })
-                print(FormatBattleReport(battleResult))
-            else
-                LunoLibrary:Notify({ Title = "Test Attack Result", Content = "GAGAL menyerang " .. target.name, Duration = 4 })
-            end
         end
     })
 
@@ -888,38 +827,6 @@ do
         end
     })
 
-    FightTab:CreateSection("Debug")
-
-    FightTab:CreateButton({
-        Title = "Debug Stamina Detection (Cek Console)",
-        Callback = function()
-            local stamina, log = GetMyStamina(true)
-            print("========== STAMINA DEBUG ==========")
-            for _, line in ipairs(log) do print(line) end
-            LunoLibrary:Notify({ Title = "Debug Stamina", Content = stamina and ("Stamina: " .. stamina) or "Gagal!", Duration = 4 })
-        end
-    })
-
-    FightTab:CreateButton({
-        Title = "Debug Health Detection (Cek Console)",
-        Callback = function()
-            local health, log = GetMyHealth(true)
-            print("========== HEALTH DEBUG ==========")
-            for _, line in ipairs(log) do print(line) end
-            LunoLibrary:Notify({ Title = "Debug Health", Content = health and ("Health: " .. health) or "Gagal!", Duration = 4 })
-        end
-    })
-
-    FightTab:CreateButton({
-        Title = "Debug Power Detection (Cek Console)",
-        Callback = function()
-            local power, log = GetMyPower(true)
-            print("========== POWER DEBUG ==========")
-            for _, line in ipairs(log) do print(line) end
-            LunoLibrary:Notify({ Title = "Debug Power", Content = power and ("Power: " .. power) or "Gagal!", Duration = 4 })
-        end
-    })
-
     FightTab:CreateSection("Bosses")
 
     FightTab:CreateToggle({
@@ -929,20 +836,6 @@ do
         Callback = function(State)
             AutoBossEnabled = State
             if State then task.spawn(AutoBossLoop) end
-        end
-    })
-
-    FightTab:CreateButton({
-        Title = "Debug Attack Boss: boss_marchese",
-        Callback = function()
-            local invokeSuccess, bossResult = AttackBoss("boss_marchese")
-            print("========== DEBUG BOSS: boss_marchese ==========")
-            if invokeSuccess and bossResult then
-                for key, val in pairs(bossResult) do print("  " .. key .. ": " .. tostring(val)) end
-                LunoLibrary:Notify({ Title = "Debug Boss", Content = FormatBossReport("boss_marchese", bossResult), Duration = 5 })
-            else
-                LunoLibrary:Notify({ Title = "Debug Boss", Content = "Invoke gagal!", Duration = 4 })
-            end
         end
     })
 end
