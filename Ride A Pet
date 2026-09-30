@@ -1,8 +1,9 @@
---// Rossi.Draft - Ride A Pet  (versi LUNO UI)
+--// LUNO by LUNAR - Ride A Pet
 --// UI: LUNO UI Library (Lyora X)
 
 local LIB_URL = "https://raw.githubusercontent.com/lyoraaHBX/LibraryLyora-X/refs/heads/main/Lyora%20X"
 local SHOP_URL = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/ShopARide.lua"
+local ESP_URL = "https://raw.githubusercontent.com/lyoraaHBX/Module-Lyora/refs/heads/main/ESPEggARide.lua"
 local DISCORD_LINK = "https://discord.gg/AwGHNh7Z7T"
 
 ---------------------------------------------------------------------
@@ -21,8 +22,8 @@ local localPlayer = Players.LocalPlayer
 -- CLEANUP
 ---------------------------------------------------------------------
 local genv = typeof(getgenv) == "function" and getgenv() or _G
-if type(genv.RossiDraftCleanup) == "function" then
-	pcall(genv.RossiDraftCleanup)
+if type(genv.LunoByLunarCleanup) == "function" then
+	pcall(genv.LunoByLunarCleanup)
 end
 
 local CleanupList = {}
@@ -30,7 +31,7 @@ local function OnCleanup(fn)
 	table.insert(CleanupList, fn)
 end
 
-genv.RossiDraftCleanup = function()
+genv.LunoByLunarCleanup = function()
 	for i = #CleanupList, 1, -1 do
 		pcall(CleanupList[i])
 	end
@@ -44,8 +45,8 @@ local Luno = loadstring(game:HttpGet(LIB_URL))()
 assert(type(Luno) == "table" and type(Luno.CreateWindow) == "function", "LUNO UI gagal dimuat.")
 
 Luno:CreateWindow({
-	Title = "ROSSI",
-	SubTitle = "Draft | Ride A Pet",
+	Title = "LUNO",
+	SubTitle = "by LUNAR | Ride A Pet",
 	Discord = DISCORD_LINK,
 })
 
@@ -53,7 +54,7 @@ Luno:CreateWindow({
 do
 	local libCleanup = genv.LunoUI_Cleanup
 	genv.LunoUI_Cleanup = function()
-		pcall(genv.RossiDraftCleanup)
+		pcall(genv.LunoByLunarCleanup)
 		if libCleanup then
 			libCleanup()
 		end
@@ -139,15 +140,6 @@ local RarityChoices = { "Any" }
 for _, r in ipairs(RarityOrder) do
 	table.insert(RarityChoices, r)
 end
-local RarityColors = {
-	Common = Color3.fromRGB(214, 218, 228),
-	Rare = Color3.fromRGB(96, 170, 255),
-	Epic = Color3.fromRGB(190, 110, 255),
-	Legendary = Color3.fromRGB(255, 196, 66),
-	Mythic = Color3.fromRGB(255, 82, 90),
-	Divine = Color3.fromRGB(255, 240, 150),
-	Ethereal = Color3.fromRGB(125, 225, 255),
-}
 
 ---------------------------------------------------------------------
 -- UTIL
@@ -1376,11 +1368,11 @@ do
 			end,
 		})
 		if not initOk then
-			warn("[Rossi] Modul Shop gagal Init: " .. tostring(err))
+			warn("[LUNO] Modul Shop gagal Init: " .. tostring(err))
 			Notify("Shop", "Modul Shop gagal dijalankan.")
 		end
 	else
-		warn("[Rossi] Modul Shop gagal dimuat: " .. tostring(result))
+		warn("[LUNO] Modul Shop gagal dimuat: " .. tostring(result))
 		Notify("Shop", "Modul Shop gagal dimuat dari GitHub.")
 	end
 end
@@ -1712,192 +1704,35 @@ do
 end
 
 ---------------------------------------------------------------------
--- UI : FARM TAB (pindahan dari Player) - ESP
+-- MODULE : ESP EGG + RARITY (dimuat dari GitHub)
 ---------------------------------------------------------------------
-FarmTab:CreateSection("ESP", { Box = true })
-
 do
-	local font = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.ExtraBold, Enum.FontStyle.Normal)
-	local espMinRank = 0
-	local folder = nil
-	local entries = {}
-	local conns = {}
+	local ok, result = pcall(function()
+		return loadstring(game:HttpGet(ESP_URL))()
+	end)
 
-	local function styleLabel(label, height)
-		label.BackgroundTransparency = 1
-		label.FontFace = font
-		label.TextScaled = true
-		label.TextStrokeTransparency = 1
-		label.TextColor3 = Color3.fromRGB(255, 255, 255)
-		label.Size = UDim2.new(1, 0, 0, height)
-		local stroke = Instance.new("UIStroke")
-		stroke.Name = RandName()
-		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
-		stroke.LineJoinMode = Enum.LineJoinMode.Round
-		stroke.Color = Color3.fromRGB(0, 0, 0)
-		stroke.Thickness = 1.8
-		stroke.Transparency = 0.05
-		stroke.Parent = label
+	if ok and type(result) == "table" and type(result.Init) == "function" then
+		local initOk, err = pcall(result.Init, {
+			FarmTab = FarmTab,
+			LocalPlayer = localPlayer,
+			RunService = RunService,
+			ActiveEggs = ActiveEggs,
+			GuiParent = GuiParent,
+			Util = Util,
+			On = On,
+			OnCleanup = OnCleanup,
+			RandName = RandName,
+			RarityChoices = RarityChoices,
+			RarityRank = RarityRank,
+		})
+		if not initOk then
+			warn("[LUNO] Modul ESP gagal Init: " .. tostring(err))
+			Notify("ESP", "Modul ESP gagal dijalankan.")
+		end
+	else
+		warn("[LUNO] Modul ESP gagal dimuat: " .. tostring(result))
+		Notify("ESP", "Modul ESP gagal dimuat dari GitHub.")
 	end
-
-	local function removeEntry(cfg)
-		local e = entries[cfg]
-		if e then
-			entries[cfg] = nil
-			pcall(function()
-				e.Gui:Destroy()
-			end)
-		end
-	end
-
-	local function addEntry(cfg)
-		if entries[cfg] or not folder then
-			return
-		end
-		local eggName = cfg:GetAttribute("Egg")
-		local pos = cfg:GetAttribute("Position")
-		if type(eggName) ~= "string" or typeof(pos) ~= "Vector3" then
-			return
-		end
-		local privateTo = cfg:GetAttribute("PrivateTo")
-		if privateTo ~= nil and privateTo ~= localPlayer.UserId then
-			return
-		end
-		if Util.EggRank(eggName) < espMinRank then
-			return
-		end
-
-		local rarity = Util.EggRarity(eggName)
-		local gui = Instance.new("BillboardGui")
-		gui.Name = RandName()
-		gui.AlwaysOnTop = true
-		gui.LightInfluence = 0
-		gui.Size = UDim2.fromOffset(170, 46)
-		gui.Adornee = workspace.Terrain
-		gui.StudsOffsetWorldSpace = pos + Vector3.new(0, 4, 0)
-		gui.MaxDistance = 100000
-
-		local frame = Instance.new("Frame")
-		frame.Name = RandName()
-		frame.BackgroundTransparency = 1
-		frame.Size = UDim2.fromScale(1, 1)
-		frame.Parent = gui
-
-		local layout = Instance.new("UIListLayout")
-		layout.Name = RandName()
-		layout.SortOrder = Enum.SortOrder.LayoutOrder
-		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-		layout.Parent = frame
-
-		local title = Instance.new("TextLabel")
-		title.Name = RandName()
-		title.LayoutOrder = 1
-		styleLabel(title, 24)
-		title.Text = eggName
-		title.TextColor3 = RarityColors[rarity] or Color3.fromRGB(255, 255, 255)
-		title.Parent = frame
-
-		local info = Instance.new("TextLabel")
-		info.Name = RandName()
-		info.LayoutOrder = 2
-		styleLabel(info, 18)
-		info.TextColor3 = Color3.fromRGB(230, 232, 240)
-		info.Parent = frame
-
-		gui.Parent = folder
-		entries[cfg] = {
-			Gui = gui,
-			Info = info,
-			Rarity = rarity,
-			Position = pos,
-			Weight = tonumber(cfg:GetAttribute("Weight")) or 1,
-		}
-	end
-
-	local function stopESP()
-		for _, c in ipairs(conns) do
-			c:Disconnect()
-		end
-		table.clear(conns)
-		for cfg in pairs(entries) do
-			removeEntry(cfg)
-		end
-		if folder then
-			pcall(function()
-				folder:Destroy()
-			end)
-			folder = nil
-		end
-	end
-
-	local function startESP()
-		stopESP()
-		folder = Instance.new("Folder")
-		folder.Name = RandName()
-		folder.Parent = GuiParent
-
-		local children = ActiveEggs:GetChildren()
-		task.spawn(function()
-			local i = 1
-			while folder and i <= #children do
-				local budget = os.clock() + 0.004
-				while i <= #children and os.clock() < budget do
-					addEntry(children[i])
-					i += 1
-				end
-				RunService.Heartbeat:Wait()
-			end
-		end)
-
-		table.insert(conns, ActiveEggs.ChildAdded:Connect(function(child)
-			task.defer(addEntry, child)
-		end))
-		table.insert(conns, ActiveEggs.ChildRemoved:Connect(removeEntry))
-
-		local acc = 0
-		table.insert(conns, RunService.Heartbeat:Connect(function(dt)
-			acc += dt
-			if acc < 0.5 then
-				return
-			end
-			acc = 0
-			local root = Util.Root()
-			if not root then
-				return
-			end
-			for _, e in pairs(entries) do
-				e.Info.Text = string.format("%s  %.2fkg  %dm", e.Rarity, e.Weight, math.floor((e.Position - root.Position).Magnitude))
-			end
-		end))
-	end
-
-	OnCleanup(stopESP)
-
-	FarmTab:CreateToggle({
-		Title = "ESP Eggs",
-		Default = false,
-		Flag = "ESPEggs",
-		Callback = function(state)
-			if state then
-				startESP()
-			else
-				stopESP()
-			end
-		end,
-	})
-
-	FarmTab:CreateDropdown({
-		Title = "ESP Min Rarity",
-		Options = RarityChoices,
-		Default = RarityChoices[1],
-		Flag = "ESPMinRarity",
-		Callback = function(value)
-			espMinRank = RarityRank[tostring(value)] or 0
-			if On("ESPEggs") then
-				startESP()
-			end
-		end,
-	})
 end
 
 ---------------------------------------------------------------------
@@ -2005,4 +1840,4 @@ PlayerTab:CreateToggle({
 	Callback = function() end,
 })
 
-Notify("Rossi.Draft", "Ride A Pet loaded (LUNO UI).")
+Notify("LUNO by LUNAR", "Ride A Pet loaded.")
